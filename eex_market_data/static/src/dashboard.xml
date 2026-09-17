@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+    <t t-name="eex_market_data.Dashboard" owl="1">
+        <div class="eex-board">
+            <header class="eex-header">
+                <div><div class="eex-eyebrow">EEX / ENERGY FUTURES</div><h1>Market board</h1><p>Your instruments. One shared market feed.</p></div>
+                <button class="btn btn-primary" t-on-click="create"><i class="fa fa-plus me-2"/>New watchlist</button>
+            </header>
+            <div t-if="state.error" class="alert alert-danger" role="alert"><t t-esc="state.error"/><button class="btn btn-link" t-on-click="load">Retry</button></div>
+            <t t-if="state.data">
+                <t t-if="state.data.selected">
+                    <div class="eex-toolbar">
+                        <div><label for="eex-watchlist-select">Watchlist</label><select id="eex-watchlist-select" class="form-select" t-on-change="select"><option t-foreach="state.data.watchlists" t-as="item" t-key="item.id" t-att-value="item.id" t-att-selected="item.id === state.data.selected"><t t-esc="item.name"/></option></select></div>
+                        <div class="eex-actions"><button class="btn btn-outline-primary" t-on-click="refresh" t-att-disabled="state.busy"><i class="fa fa-refresh me-2"/>Request refresh</button><button t-if="state.data.can_edit" class="btn btn-outline-secondary" t-on-click="edit">Edit watchlist</button><button class="btn btn-outline-secondary" t-on-click="history">History</button><button class="btn btn-outline-secondary" t-on-click="export">Export Excel</button></div>
+                    </div>
+                    <div class="eex-summary">
+                        <div><span>Instruments</span><strong t-esc="state.data.rows.length"/></div>
+                        <div><span>Collection target</span><strong><t t-if="state.data.refresh_interval"><t t-esc="Math.max(state.data.refresh_interval, state.data.minimum_refresh)"/> sec</t><t t-else="">Manual</t></strong></div>
+                        <div><span>Subscription</span><strong t-esc="state.data.timing === 'realtime' ? 'Real-time' : state.data.timing === 'delayed' ? 'Delayed' : 'Timing unverified'"/></div>
+                        <div><span>Board updates</span><strong>Every 15 seconds</strong></div>
+                    </div>
+                    <div t-if="!state.data.enabled" class="alert alert-warning">Collection is not enabled. An EEX administrator must configure the connection.</div>
+                    <div t-if="state.data.pending" class="alert alert-info">A collection refresh has been requested. Prices appear after the background worker completes.</div>
+                    <div class="eex-table-wrap" t-if="state.data.rows.length">
+                        <table class="table eex-table"><thead><tr><th>Instrument / delivery</th><th>Market / units</th><th t-foreach="state.data.columns" t-as="column" t-key="column.key" class="text-end" t-esc="column.label"/><th>Feed status / timestamps (UTC)</th></tr></thead>
+                            <tbody><tr t-foreach="state.data.rows" t-as="row" t-key="row.id">
+                                <td><strong t-esc="row.name"/><small t-esc="row.long_name"/><small><t t-esc="row.delivery_start"/> — <t t-esc="row.delivery_end"/></small><span t-if="!row.available" class="text-warning">Outside latest catalogue</span></td>
+                                <td><strong t-esc="row.market"/><small><t t-esc="row.currency || '—'"/> / <t t-esc="row.price_unit || '—'"/></small><small>Volume: <t t-esc="row.volume_unit || '—'"/></small></td>
+                                <td t-foreach="state.data.columns" t-as="column" t-key="column.key" class="text-end eex-number" t-att-title="detail(feed(row, column.key))"><span t-att-class="['stale', 'error', 'paused'].includes(feed(row, column.key).status) ? 'text-warning' : ''" t-esc="value(row, column.key)"/></td>
+                                <td class="eex-feed-status"><div t-foreach="['stat','tob','spr']" t-as="kind" t-key="kind" t-att-title="detail(row.feeds[kind])"><span t-att-class="'eex-dot eex-' + row.feeds[kind].status"/><strong t-esc="kind === 'stat' ? 'Stats' : kind === 'tob' ? 'Bid/ask' : 'Settlement'"/>: <t t-esc="label(row.feeds[kind].status)"/><small>Date: <t t-esc="row.feeds[kind].trade_date || '—'"/> · Fetched: <t t-esc="row.feeds[kind].fetched_at || '—'"/></small><small>Source: <t t-esc="row.feeds[kind].source_at || 'Not supplied'"/></small></div></td>
+                            </tr></tbody>
+                        </table>
+                    </div>
+                    <div t-else="" class="eex-empty"><i class="fa fa-list-alt"/><h2>Choose your futures</h2><p>Add instruments from the catalogue to start following their prices.</p><button t-if="state.data.can_edit" class="btn btn-primary" t-on-click="edit">Select instruments</button></div>
+                    <p class="eex-footnote">The board reads cached data. Collection intervals are targets, subject to queue load and EEX limits. “—” means unavailable; settlement prices are for the displayed trading date. History contains sampled observations collected since activation.</p>
+                </t>
+                <div t-else="" class="eex-empty"><i class="fa fa-line-chart"/><h2>A watchlist for your markets</h2><p>Create a personal selection of futures, choose your columns, and set a collection interval.</p><button class="btn btn-primary" t-on-click="create">Create watchlist</button></div>
+            </t>
+            <div t-elif="!state.error" class="eex-empty">Loading market board…</div>
+        </div>
+    </t>
+</templates>

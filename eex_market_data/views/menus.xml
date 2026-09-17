@@ -1,0 +1,10 @@
+<odoo>
+    <menuitem id="menu_eex_root" name="EEX Market Data" sequence="30" groups="group_eex_user"/>
+    <menuitem id="menu_board" name="Market Board" parent="menu_eex_root" action="action_dashboard" sequence="10"/>
+    <menuitem id="menu_watchlists" name="Watchlists" parent="menu_eex_root" action="action_watchlists" sequence="20"/>
+    <menuitem id="menu_catalogue" name="Instrument Catalogue" parent="menu_eex_root" action="action_instruments" sequence="30"/>
+    <menuitem id="menu_configuration" name="Configuration" parent="menu_eex_root" sequence="90" groups="group_eex_manager"/>
+    <menuitem id="menu_connections" name="Connections" parent="menu_configuration" action="action_connections" sequence="10"/>
+    <menuitem id="menu_markets" name="Markets" parent="menu_configuration" action="action_markets" sequence="20"/>
+    <menuitem id="menu_jobs" name="Collection Jobs" parent="menu_configuration" action="action_jobs" sequence="30"/>
+</odoo>

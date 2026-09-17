@@ -1,0 +1,25 @@
+{
+    'name': 'EEX Market Data',
+    'summary': 'Personal futures watchlists powered by EEX DataSource REST v2',
+    'version': '16.0.1.0.0',
+    'category': 'Productivity',
+    'license': 'LGPL-3',
+    'depends': ['base', 'web'],
+    'external_dependencies': {'python': ['requests', 'xlsxwriter']},
+    'data': [
+        'security/security.xml',
+        'security/ir.model.access.csv',
+        'views/configuration.xml',
+        'views/market_data.xml',
+        'views/watchlist.xml',
+        'views/menus.xml',
+        'data/cron.xml',
+    ],
+    'assets': {'web.assets_backend': [
+        'eex_market_data/static/src/dashboard.js',
+        'eex_market_data/static/src/dashboard.xml',
+        'eex_market_data/static/src/dashboard.scss',
+    ]},
+    'application': True,
+    'installable': True,
+}

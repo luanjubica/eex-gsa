@@ -1,0 +1,9 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_connection_manager,EEX connection administrator,model_eex_connection,group_eex_manager,1,1,1,1
+access_market_user,EEX market user,model_eex_market,group_eex_user,1,0,0,0
+access_market_manager,EEX market administrator,model_eex_market,group_eex_manager,1,1,0,0
+access_instrument_user,EEX instrument user,model_eex_instrument,group_eex_user,1,0,0,0
+access_quote_user,EEX quote user,model_eex_quote,group_eex_user,1,0,0,0
+access_snapshot_user,EEX snapshot user,model_eex_snapshot,group_eex_user,1,0,0,0
+access_watchlist_user,EEX watchlist user,model_eex_watchlist,group_eex_user,1,1,1,1
+access_job_manager,EEX job administrator,model_eex_job,group_eex_manager,1,0,0,0

@@ -1,0 +1,34 @@
+# Local evaluation only. Do not expose this configuration to the public internet.
+services:
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: odoo
+      POSTGRES_PASSWORD: eex-local-only
+      POSTGRES_DB: postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U odoo"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - eex-db:/var/lib/postgresql/data
+  odoo:
+    image: odoo:16.0
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:18069:8069"
+    environment:
+      HOST: db
+      USER: odoo
+      PASSWORD: eex-local-only
+      EEX_API_TOKEN: ${EEX_API_TOKEN:-}
+    volumes:
+      - ./eex_market_data:/mnt/extra-addons/eex_market_data:ro
+      - eex-odoo:/var/lib/odoo
+    command: ["odoo", "-d", "eex_dev", "-i", "eex_market_data", "--without-demo=all", "--db-filter=^eex_dev$", "--max-cron-threads=1"]
+volumes:
+  eex-db:
+  eex-odoo:

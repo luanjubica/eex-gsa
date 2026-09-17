@@ -1,0 +1,78 @@
+/** @odoo-module **/
+import { registry } from '@web/core/registry';
+import { useService } from '@web/core/utils/hooks';
+import { Component, onWillStart, onWillUnmount, useState } from '@odoo/owl';
+
+export class EexDashboard extends Component {
+    setup() {
+        this.orm = useService('orm');
+        this.action = useService('action');
+        this.notification = useService('notification');
+        this.state = useState({ data: null, error: '', busy: false });
+        this.selected = this.props.action.params?.watchlist_id || false;
+        this.alive = true;
+        this.sequence = 0;
+        onWillStart(async () => {
+            await this.load();
+            this.timer = setInterval(() => {
+                if (!document.hidden && !this.state.busy) this.load();
+            }, 15000);
+        });
+        onWillUnmount(() => { this.alive = false; clearInterval(this.timer); });
+    }
+    async load() {
+        const sequence = ++this.sequence;
+        this.state.busy = true;
+        try {
+            const data = await this.orm.call('eex.watchlist', 'dashboard_data', [this.selected]);
+            if (this.alive && sequence === this.sequence) {
+                this.state.data = data;
+                this.selected = data.selected;
+                this.state.error = '';
+            }
+        } catch (error) {
+            if (this.alive && sequence === this.sequence) {
+                this.state.error = 'Could not load the watchlist. Check your connection and access permissions.';
+            }
+        } finally {
+            if (this.alive && sequence === this.sequence) this.state.busy = false;
+        }
+    }
+    async select(event) { this.selected = Number(event.target.value); await this.load(); }
+    async refresh() {
+        try {
+            await this.orm.call('eex.watchlist', 'action_refresh', [[this.selected]]);
+            this.notification.add('Refresh queued. The background worker will collect data within the configured limits.', { type: 'info' });
+            await this.load();
+        } catch (error) {
+            this.notification.add('Could not queue a refresh.', { type: 'danger' });
+        }
+    }
+    edit() {
+        return this.action.doAction({ type: 'ir.actions.act_window', res_model: 'eex.watchlist',
+            res_id: this.selected, views: [[false, 'form']], target: 'current' });
+    }
+    create() {
+        return this.action.doAction({ type: 'ir.actions.act_window', res_model: 'eex.watchlist',
+            views: [[false, 'form']], target: 'current' });
+    }
+    async history() {
+        const action = await this.orm.call('eex.watchlist', 'action_history', [[this.selected]]);
+        return this.action.doAction(action);
+    }
+    export() { window.location.assign(`/eex/watchlist/${this.selected}/export`); }
+    feed(row, key) { return row.feeds[key === 'settlement' ? 'spr' : ['bid', 'ask'].includes(key) ? 'tob' : 'stat']; }
+    value(row, key) {
+        const value = this.feed(row, key).values[key];
+        return value === null || value === undefined ? '—' : new Intl.NumberFormat(undefined, { maximumFractionDigits: key === 'volume' ? 2 : 4 }).format(value);
+    }
+    label(status) {
+        return { ok: 'Available', waiting: 'Awaiting data', empty: 'No data', stale: 'Stale cache',
+            previous_day: 'Earlier trading day', error: 'Collection error', disabled: 'Feed disabled', paused: 'Collection paused' }[status] || status;
+    }
+    detail(feed) {
+        return `${this.label(feed.status)}\nTrading date: ${feed.trade_date || '—'}\nSource: ${feed.source_at ? feed.source_at + ' UTC' : 'Not supplied'}\nFetched: ${feed.fetched_at ? feed.fetched_at + ' UTC' : '—'}${feed.message ? '\n' + feed.message : ''}`;
+    }
+}
+EexDashboard.template = 'eex_market_data.Dashboard';
+registry.category('actions').add('eex_market_data.dashboard', EexDashboard);

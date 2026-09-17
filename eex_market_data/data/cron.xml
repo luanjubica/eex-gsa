@@ -1,0 +1,14 @@
+<odoo noupdate="1">
+    <record id="ir_cron_eex_collect" model="ir.cron">
+        <field name="name">EEX: schedule and collect market data</field>
+        <field name="model_id" ref="model_eex_job"/>
+        <field name="state">code</field>
+        <field name="code">model._cron_collect()</field>
+        <field name="interval_number">1</field>
+        <field name="interval_type">minutes</field>
+        <field name="numbercall">-1</field>
+        <field name="doall" eval="False"/>
+        <field name="user_id" ref="base.user_root"/>
+        <field name="active" eval="True"/>
+    </record>
+</odoo>
