@@ -1,11 +1,13 @@
 <odoo>
     <record id="view_watchlist_tree" model="ir.ui.view">
         <field name="name">eex.watchlist.tree</field><field name="model">eex.watchlist</field>
-        <field name="arch" type="xml"><tree><field name="name"/><field name="owner_id"/><field name="company_id" groups="base.group_multi_company"/><field name="shared"/><field name="refresh_interval"/><button name="action_dashboard" type="object" string="Open board" icon="fa-table"/></tree></field>
+        <field name="arch" type="xml">
+            <tree><field name="name"/><field name="owner_id"/><field name="company_id" groups="base.group_multi_company"/><field name="shared"/><field name="refresh_interval"/><button name="action_dashboard" type="object" string="Open board" icon="fa-table"/></tree></field>
     </record>
     <record id="view_watchlist_form" model="ir.ui.view">
         <field name="name">eex.watchlist.form</field><field name="model">eex.watchlist</field>
-        <field name="arch" type="xml"><form><header><button name="action_dashboard" type="object" string="Open board" class="oe_highlight"/><button name="action_refresh" type="object" string="Request refresh"/><button name="action_export" type="object" string="Export Excel"/><button name="action_history" type="object" string="Price history"/></header><sheet>
+        <field name="arch" type="xml">
+            <form><header><button name="action_dashboard" type="object" string="Open board" class="oe_highlight"/><button name="action_refresh" type="object" string="Request refresh"/><button name="action_export" type="object" string="Export Excel"/><button name="action_history" type="object" string="Price history"/></header><sheet>
             <field name="active" invisible="1"/><div class="oe_title"><h1><field name="name" placeholder="e.g. Power — next winter"/></h1></div>
             <group><group><field name="owner_id" readonly="1"/><field name="company_id" groups="base.group_multi_company"/><field name="company_id" invisible="1" groups="!base.group_multi_company"/><field name="shared"/></group><group><field name="refresh_interval"/><field name="last_scheduled"/><field name="refresh_requested"/></group></group>
             <div class="alert alert-info">Choose instruments from the catalogue. Collection continues in the background while your watchlist is active. Set the interval to 0 for manual collection. The administrator's minimum interval also applies.</div>
