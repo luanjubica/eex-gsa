@@ -71,6 +71,7 @@ export class EexDashboard extends Component {
         return { ok: 'Available', waiting: 'Awaiting data', empty: 'No data', stale: 'Stale cache',
             previous_day: 'Earlier trading day', error: 'Collection error', disabled: 'Feed disabled', paused: 'Collection paused' }[status] || status;
     }
+    shortTime(feed) { return feed.fetched_at ? feed.fetched_at.slice(11, 19) : '—'; }
     detail(feed) {
         return `${this.label(feed.status)}\nTrading date: ${feed.trade_date || '—'}\nSource: ${feed.source_at ? feed.source_at + ' UTC' : 'Not supplied'}\nFetched: ${feed.fetched_at ? feed.fetched_at + ' UTC' : '—'}${feed.message ? '\n' + feed.message : ''}`;
     }

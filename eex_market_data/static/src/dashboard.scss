@@ -15,10 +15,15 @@
         td { padding: 16px 15px; vertical-align: top; border-color: #edf1f2; }
         small { display: block; font-size: 11px; color: #72858c; margin-top: 4px; }
         .eex-number { font-variant-numeric: tabular-nums; white-space: nowrap; font-weight: 600; }
-        .eex-feed-status { font-size: 11px; min-width: 255px; > div + div { margin-top: 10px; } small { font-size: 10px; } } }
+        .eex-feed-status { font-size: 11px; min-width: 255px;
+            .eex-feed-line { display: flex; align-items: center; gap: 5px; min-height: 18px; white-space: nowrap; }
+            .eex-feed-line + .eex-feed-line { margin-top: 4px; }
+            .eex-feed-label { min-width: 64px; }
+            .eex-feed-time { margin: 0 0 0 auto; color: #72858c; font-size: 10px; font-variant-numeric: tabular-nums; }
+        } }
     .eex-dot { display: inline-block; width: 7px; height: 7px; border-radius: 100%; margin-right: 5px; background: #99a7ac; }
     .eex-ok { background: #2d9b79; } .eex-stale, .eex-previous_day { background: #d59935; } .eex-error { background: #c95b56; }
-    .eex-empty { padding: 65px 24px; text-align: center; background: white; border: 1px solid #dfe7e9; border-radius: 8px;
+    .eex-empty-state { padding: 65px 24px; text-align: center; background: white; border: 1px solid #dfe7e9; border-radius: 8px;
         > i { font-size: 35px; color: #328578; margin-bottom: 20px; } h2 { font-size: 23px; } p { color: #71828a; margin-bottom: 22px; } }
     .eex-footnote { color: #71828a; font-size: 11px; margin-top: 16px; max-width: 1100px; }
     @media (max-width: 800px) { padding: 18px; .eex-summary { grid-template-columns: repeat(2, 1fr); } .eex-header h1 { font-size: 26px; } }
