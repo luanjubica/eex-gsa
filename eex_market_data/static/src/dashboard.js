@@ -8,10 +8,12 @@ export class EexDashboard extends Component {
         this.orm = useService('orm');
         this.action = useService('action');
         this.notification = useService('notification');
-        this.state = useState({ data: null, error: '', busy: false, checkedAt: '' });
+        this.state = useState({ data: null, error: '', busy: false, checkedAt: '', changedCells: {} });
         this.selected = this.props.action.params?.watchlist_id || false;
         this.alive = true;
         this.sequence = 0;
+        this.previousValues = null;
+        this.previousWatchlist = false;
         onWillStart(async () => {
             await this.load();
             this.timer = setInterval(() => {
@@ -26,6 +28,7 @@ export class EexDashboard extends Component {
         try {
             const data = await this.orm.call('eex.watchlist', 'dashboard_data', [this.selected]);
             if (this.alive && sequence === this.sequence) {
+                this.trackChanges(data);
                 this.state.data = data;
                 this.state.checkedAt = new Date().toLocaleTimeString();
                 this.selected = data.selected;
@@ -39,6 +42,38 @@ export class EexDashboard extends Component {
             if (this.alive && sequence === this.sequence) this.state.busy = false;
         }
     }
+    cellKey(row, key) { return `${row.id}:${key}`; }
+    rawValue(row, key) {
+        const value = this.feed(row, key).values[key];
+        return value === undefined ? null : value;
+    }
+    trackChanges(data) {
+        const now = Date.now();
+        const snapshot = {};
+        const sameWatchlist = this.previousWatchlist === data.selected;
+        const changed = {};
+        if (sameWatchlist) {
+            for (const [key, until] of Object.entries(this.state.changedCells)) {
+                if (until > now) changed[key] = until;
+            }
+        }
+        for (const row of data.rows) {
+            for (const column of data.columns) {
+                const key = this.cellKey(row, column.key);
+                const value = this.value(row, column.key);
+                snapshot[key] = value;
+                if (sameWatchlist && this.previousValues &&
+                        Object.prototype.hasOwnProperty.call(this.previousValues, key) &&
+                        this.previousValues[key] !== value) {
+                    changed[key] = now + 30000;
+                }
+            }
+        }
+        this.previousValues = snapshot;
+        this.previousWatchlist = data.selected;
+        this.state.changedCells = changed;
+    }
+    isChanged(row, key) { return Boolean(this.state.changedCells[this.cellKey(row, key)]); }
     async select(event) { this.selected = Number(event.target.value); await this.load(); }
     async refresh() {
         try {
@@ -64,8 +99,8 @@ export class EexDashboard extends Component {
     export() { window.location.assign(`/eex/watchlist/${this.selected}/export`); }
     feed(row, key) { return row.feeds[key === 'settlement' ? 'spr' : ['bid', 'ask'].includes(key) ? 'tob' : 'stat']; }
     value(row, key) {
-        const value = this.feed(row, key).values[key];
-        return value === null || value === undefined ? '—' : new Intl.NumberFormat(undefined, { maximumFractionDigits: key === 'volume' ? 2 : 4 }).format(value);
+        const value = this.rawValue(row, key);
+        return value === null ? '—' : new Intl.NumberFormat(undefined, { maximumFractionDigits: key === 'volume' ? 2 : 4 }).format(value);
     }
     label(status) {
         return { ok: 'Available', waiting: 'Awaiting data', empty: 'No data', stale: 'Stale cache',
