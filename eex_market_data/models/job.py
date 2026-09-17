@@ -7,7 +7,7 @@ import pytz
 from odoo import api, fields, models, _
 from odoo.exceptions import AccessError
 
-from ..services.client import EexClient, EexError
+from ..services.client import EexClient, EexError, MISSING_TOKEN_MESSAGE
 from ..services.normalization import reference_values, quote_values, utc_timestamp
 
 _logger = logging.getLogger(__name__)
@@ -46,9 +46,12 @@ class EexJob(models.Model):
         if not job:
             return self.create({'name': name, 'connection_id': connection.id, 'kind': kind,
                                 'market_id': market.id if market else False, 'commodity': commodity})
-        if job.state == 'done':
+        restored_token = (job.state == 'failed' and job.message == MISSING_TOKEN_MESSAGE
+                          and bool(connection._token()))
+        if job.state == 'done' or restored_token:
             earliest = (job.last_attempt or fields.Datetime.now()) + timedelta(seconds=connection.minimum_refresh)
-            job.write({'state': 'pending', 'attempts': 0, 'next_run': max(fields.Datetime.now(), earliest)})
+            job.write({'state': 'pending', 'attempts': 0, 'message': False,
+                       'next_run': max(fields.Datetime.now(), earliest)})
         return job
 
     def action_retry(self):

@@ -1,3 +1,4 @@
+import os
 from datetime import timedelta
 from unittest.mock import patch
 from unittest import TestCase
@@ -86,6 +87,22 @@ class TestEexMarketData(TransactionCase):
         previous = self.watchlist.last_scheduled
         self.env['eex.job']._schedule()
         self.assertEqual(self.watchlist.last_scheduled, previous)
+
+    def test_missing_token_job_requeues_after_restore(self):
+        job = self.job()
+        job.write({'state': 'failed', 'message': 'Configure a valid EEX access token on the server.',
+                   'last_attempt': fields.Datetime.now() - timedelta(minutes=10)})
+        with patch.dict(os.environ, {'EEX_API_TOKEN': ''}):
+            self.job()
+            self.assertEqual(job.state, 'failed')
+        with patch.dict(os.environ, {'EEX_API_TOKEN': 'restored'}):
+            self.job()
+            self.assertEqual(job.state, 'pending')
+            self.assertFalse(job.message)
+        job.write({'state': 'failed', 'message': 'The EEX subscription does not permit this request.'})
+        with patch.dict(os.environ, {'EEX_API_TOKEN': 'restored'}):
+            self.job()
+            self.assertEqual(job.state, 'failed')
 
     def test_worker_keeps_last_good_data_on_error(self):
         job = self.job()

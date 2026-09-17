@@ -6,6 +6,7 @@ import requests
 
 BASE_URL = 'https://api.eex-group.com/v2'
 MAX_RECORDS = 60000
+MISSING_TOKEN_MESSAGE = 'Configure a valid EEX access token on the server.'
 
 
 class EexError(Exception):
@@ -23,7 +24,7 @@ class EexClient:
 
     def get(self, *segments, listing=False):
         if not self.token or '\n' in self.token or '\r' in self.token:
-            raise EexError('Configure a valid EEX access token on the server.')
+            raise EexError(MISSING_TOKEN_MESSAGE)
         if not segments or segments[0] not in ('rd', 'stat', 'tob', 'spr'):
             raise EexError('Unsupported EEX endpoint.')
         path = '/'.join(quote(str(part), safe='') for part in segments)

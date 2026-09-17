@@ -17,7 +17,7 @@
                         <div><span>Instruments</span><strong t-esc="state.data.rows.length"/></div>
                         <div><span>Collection target</span><strong><t t-if="state.data.refresh_interval"><t t-esc="Math.max(state.data.refresh_interval, state.data.minimum_refresh)"/> sec</t><t t-else="">Manual</t></strong></div>
                         <div><span>Subscription</span><strong t-esc="state.data.timing === 'realtime' ? 'Real-time' : state.data.timing === 'delayed' ? 'Delayed' : 'Timing unverified'"/></div>
-                        <div><span>Board updates</span><strong>Every 15 seconds</strong></div>
+                        <div><span>Board checked (local)</span><strong t-esc="state.checkedAt || '—'"/></div>
                     </div>
                     <div t-if="!state.data.enabled" class="alert alert-warning">Collection is not enabled. An EEX administrator must configure the connection.</div>
                     <div t-if="state.data.pending" class="alert alert-info">A collection refresh has been requested. Prices appear after the background worker completes.</div>
@@ -32,7 +32,7 @@
                         </table>
                     </div>
                     <div t-else="" class="eex-empty"><i class="fa fa-list-alt"/><h2>Choose your futures</h2><p>Add instruments from the catalogue to start following their prices.</p><button t-if="state.data.can_edit" class="btn btn-primary" t-on-click="edit">Select instruments</button></div>
-                    <p class="eex-footnote">The board reads cached data. Collection intervals are targets, subject to queue load and EEX limits. “—” means unavailable; settlement prices are for the displayed trading date. History contains sampled observations collected since activation.</p>
+                    <p class="eex-footnote">The board checks Odoo every 15 seconds while this page is visible. EEX collection follows the configured target interval, subject to queue load and EEX limits. “—” means unavailable; settlement prices are for the displayed trading date. History contains sampled observations collected since activation.</p>
                 </t>
                 <div t-else="" class="eex-empty"><i class="fa fa-line-chart"/><h2>A watchlist for your markets</h2><p>Create a personal selection of futures, choose your columns, and set a collection interval.</p><button class="btn btn-primary" t-on-click="create">Create watchlist</button></div>
             </t>

@@ -8,7 +8,7 @@ export class EexDashboard extends Component {
         this.orm = useService('orm');
         this.action = useService('action');
         this.notification = useService('notification');
-        this.state = useState({ data: null, error: '', busy: false });
+        this.state = useState({ data: null, error: '', busy: false, checkedAt: '' });
         this.selected = this.props.action.params?.watchlist_id || false;
         this.alive = true;
         this.sequence = 0;
@@ -27,6 +27,7 @@ export class EexDashboard extends Component {
             const data = await this.orm.call('eex.watchlist', 'dashboard_data', [this.selected]);
             if (this.alive && sequence === this.sequence) {
                 this.state.data = data;
+                this.state.checkedAt = new Date().toLocaleTimeString();
                 this.selected = data.selected;
                 this.state.error = '';
             }
