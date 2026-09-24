@@ -152,7 +152,8 @@ export class EexDashboard extends Component {
     }
     title(row, column) {
         const feed = this.feedForColumn(row, column);
-        return feed ? this.detail(feed) : '';
+        const value = this.rawValue(row, column);
+        return feed ? this.detail(feed) : value === null || value === '' ? '' : String(value);
     }
     detail(feed) {
         return `${this.label(feed.status)}\nTrading date: ${feed.trade_date || '—'}\nSource: ${feed.source_at ? feed.source_at + ' UTC' : 'Not supplied'}\nFetched: ${feed.fetched_at ? feed.fetched_at + ' UTC' : '—'}${feed.message ? '\n' + feed.message : ''}`;

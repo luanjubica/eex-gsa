@@ -38,7 +38,7 @@
                     <div t-if="!state.data.enabled" class="alert alert-warning">Collection is not enabled. An EEX administrator must configure the connection.</div>
                     <div t-if="state.data.pending" class="alert alert-info">A collection refresh has been requested. Prices appear after the background worker completes.</div>
                     <div class="eex-table-wrap" t-if="state.data.rows.length">
-                        <table class="table eex-table"><thead><tr><th t-foreach="state.data.columns" t-as="column" t-key="column.key" t-att-class="column.type === 'number' ? 'text-end' : ''" t-esc="column.label"/></tr></thead>
+                        <table class="table table-sm eex-table"><thead><tr><th t-foreach="state.data.columns" t-as="column" t-key="column.key" t-att-class="column.type === 'number' ? 'text-end' : ''" t-esc="column.label"/></tr></thead>
                             <tbody><tr t-foreach="state.data.rows" t-as="row" t-key="row.id">
                                 <td t-foreach="state.data.columns" t-as="column" t-key="column.key" t-att-class="cellClass(row, column)" t-att-title="title(row, column)">
                                     <span t-if="column.type === 'status'" t-att-class="'eex-dot eex-' + rawValue(row, column)"/>

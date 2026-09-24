@@ -1,7 +1,7 @@
 {
     'name': 'EEX Market Data',
     'summary': 'Personal futures watchlists powered by EEX DataSource REST v2',
-    'version': '16.0.4.0.0',
+    'version': '16.0.5.0.0',
     'category': 'Productivity',
     'license': 'LGPL-3',
     'depends': ['base', 'web'],

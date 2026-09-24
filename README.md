@@ -7,7 +7,7 @@ An installable Odoo 16 Community/Enterprise add-on for self-hosted installations
 - EEX DataSource REST **v2**, Bearer authentication, fixed official API origin.
 - Discovery of commodities, areas, trading dates and outright futures by ISIN.
 - Last/open/high/low prices and volume (`stat`), bid/ask (`tob`), settlement (`spr`).
-- User-owned watchlists with configurable columns for contract identity, delivery, units, every collected price/volume value, and per-feed diagnostics. Optional company sharing grants read/refresh/export access, not editing rights.
+- User-owned watchlists with 37 configurable columns for contract identity, delivery, units, every collected price/volume value, and per-feed diagnostics. The compact board uses sticky headers and a sticky first column. Optional company sharing grants read/refresh/export access, not editing rights.
 - One shared market request per feed, regardless of how many users select that market. Cache stores selected instruments only.
 - Background collection, configurable intervals, manual refresh requests, retries/backoff and job diagnostics.
 - Per-feed status, trading date, source timestamp where supplied, and fetch timestamp. Missing prices remain missing; zero and negative prices remain valid.
