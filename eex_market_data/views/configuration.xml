@@ -12,9 +12,9 @@
                     <field name="active" invisible="1"/><div class="oe_title"><h1><field name="name"/></h1></div>
                     <div class="alert alert-info" role="status">Set the EEX token in the Odoo server environment. Save and enable collection, discover markets, then enable the markets you need. Discovery and price requests run in the background.</div>
                     <group><group string="Connection"><field name="company_id" groups="base.group_multi_company"/><field name="enabled"/><field name="token_env"/><field name="token_configured"/><field name="token_expiry"/><field name="data_timing"/></group>
-                        <group string="Collection"><field name="minimum_refresh"/><field name="stale_after"/><field name="collect_stat"/><field name="collect_tob"/><field name="collect_spr"/></group></group>
+                        <group string="Collection"><field name="minimum_refresh"/><field name="board_refresh_interval"/><field name="stale_after"/><field name="collect_stat"/><field name="collect_tob"/><field name="collect_spr"/></group></group>
                     <group string="History"><field name="retain_history"/><field name="history_interval"/><field name="history_backfill_days"/><field name="retention_days"/></group>
-                    <div class="text-muted mb-3">Refresh intervals are targets. The worker runs each minute and obeys the shared API request limit. Enable only feeds covered by your subscription. Statistics have no source timestamp; their fetch time is shown separately.</div>
+                    <div class="text-muted mb-3">Minimum refresh controls EEX collection. Board cache refresh only rereads values already stored in Odoo and never calls EEX. Collection intervals are targets; the worker runs each minute and obeys the shared API request limit. Enable only feeds covered by your subscription. Statistics have no source timestamp; their fetch time is shown separately.</div>
                     <field name="market_ids" readonly="1"><tree><field name="name"/><field name="enabled"/><field name="trade_date"/><field name="catalogue_checked_at"/></tree></field>
                 </sheet>
             </form>

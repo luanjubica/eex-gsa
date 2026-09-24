@@ -19,6 +19,8 @@ class EexConnection(models.Model):
     data_timing = fields.Selection([('unknown', 'Not verified'), ('realtime', 'Real-time subscription'),
                                     ('delayed', 'Delayed subscription')], default='unknown', required=True)
     minimum_refresh = fields.Integer(default=60, string='Minimum refresh (seconds)')
+    board_refresh_interval = fields.Integer(default=60, string='Board cache refresh (seconds)',
+                                            help='How often an open market board rereads Odoo cached values. This does not call EEX.')
     stale_after = fields.Integer(default=900, string='Stale after (seconds without a successful fetch)')
     collect_stat = fields.Boolean(default=True, string='Last price and statistics')
     collect_tob = fields.Boolean(default=False, string='Bid / ask')
@@ -36,7 +38,7 @@ class EexConnection(models.Model):
         for record in self:
             record.token_configured = bool(os.environ.get(record.token_env or ''))
 
-    @api.constrains('token_env', 'minimum_refresh', 'stale_after', 'history_interval',
+    @api.constrains('token_env', 'minimum_refresh', 'board_refresh_interval', 'stale_after', 'history_interval',
                     'history_backfill_days', 'retention_days')
     def _validate_settings(self):
         for record in self:
@@ -44,6 +46,8 @@ class EexConnection(models.Model):
                 raise ValidationError(_('Use an environment variable starting with EEX_.'))
             if record.minimum_refresh < 60 or record.stale_after < record.minimum_refresh:
                 raise ValidationError(_('Minimum refresh must be at least 60 seconds; stale threshold must be no shorter.'))
+            if not 5 <= record.board_refresh_interval <= 3600:
+                raise ValidationError(_('Board cache refresh must be between 5 and 3,600 seconds.'))
             if record.history_interval < 60 or record.retention_days < 1:
                 raise ValidationError(_('History interval must be at least 60 seconds and retention at least one day.'))
             if not 1 <= record.history_backfill_days <= 366:

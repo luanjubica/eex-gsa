@@ -197,6 +197,26 @@ class TestEexMarketData(TransactionCase):
         self.assertEqual(data['rows'][0]['feeds']['tob']['status'], 'stale')
         self.assertIn('collection_progress', data)
 
+    def test_board_columns_are_configurable_and_complete(self):
+        data = self.watchlist.dashboard_data(self.watchlist.id)
+        keys = {column['key'] for column in data['columns']}
+        self.assertTrue({'name', 'market', 'maturity', 'delivery_start', 'last', 'bid',
+                         'settlement', 'stat_status', 'tob_fetched_at', 'spr_status'} <= keys)
+        self.watchlist.write({'show_isin': True, 'show_expiry_date': True,
+                              'show_tob_source_at': True, 'show_last': False})
+        data = self.watchlist.dashboard_data(self.watchlist.id)
+        columns = {column['key']: column for column in data['columns']}
+        self.assertIn('isin', columns)
+        self.assertIn('expiry_date', columns)
+        self.assertIn('tob_source_at', columns)
+        self.assertNotIn('last', columns)
+        self.assertEqual(data['rows'][0]['isin'], self.instrument.isin)
+        self.assertEqual(data['board_refresh_interval'], 60)
+        with self.assertRaises(ValidationError):
+            with self.env.cr.savepoint():
+                self.watchlist.write({field_name: False for field_name in self.watchlist._fields
+                                      if field_name.startswith('show_')})
+
     def test_catalogue_import_excludes_options_and_spreads(self):
         row = self.row(ShortCode='DEBM', Maturity=202610, ProductType='Future', Currency='EUR', UOM='MWh')
         with patch('odoo.addons.eex_market_data.models.job.EexClient.get', return_value=[row,
@@ -228,3 +248,6 @@ class TestEexMarketData(TransactionCase):
         with self.assertRaises(ValidationError):
             with self.env.cr.savepoint():
                 self.connection.write({'history_backfill_days': 0})
+        with self.assertRaises(ValidationError):
+            with self.env.cr.savepoint():
+                self.connection.write({'board_refresh_interval': 2})

@@ -23,7 +23,7 @@
                     <div class="eex-progress-card">
                         <div class="eex-progress-copy">
                             <strong t-esc="state.busy ? 'Checking Odoo now…' : 'Next board cache check in ' + state.secondsUntilCheck + 's'"/>
-                            <span>Visible board timer · no direct EEX API call</span>
+                            <span><t t-esc="state.data.board_refresh_interval"/> second cache timer · no direct EEX API call</span>
                         </div>
                         <div class="eex-progress-track" role="progressbar" aria-label="Time until next board cache check" aria-valuemin="0" aria-valuemax="100" t-att-aria-valuenow="state.checkProgress">
                             <span class="eex-progress-bar eex-progress-check" t-att-style="'width: ' + state.checkProgress + '%'"/>
@@ -38,17 +38,18 @@
                     <div t-if="!state.data.enabled" class="alert alert-warning">Collection is not enabled. An EEX administrator must configure the connection.</div>
                     <div t-if="state.data.pending" class="alert alert-info">A collection refresh has been requested. Prices appear after the background worker completes.</div>
                     <div class="eex-table-wrap" t-if="state.data.rows.length">
-                        <table class="table eex-table"><thead><tr><th>Instrument / delivery</th><th>Market / units</th><th t-foreach="state.data.columns" t-as="column" t-key="column.key" class="text-end" t-esc="column.label"/><th>Feed status / fetched (UTC)</th></tr></thead>
+                        <table class="table eex-table"><thead><tr><th t-foreach="state.data.columns" t-as="column" t-key="column.key" t-att-class="column.type === 'number' ? 'text-end' : ''" t-esc="column.label"/></tr></thead>
                             <tbody><tr t-foreach="state.data.rows" t-as="row" t-key="row.id">
-                                <td><strong t-esc="row.name"/><small t-esc="row.long_name"/><small><t t-esc="row.delivery_start"/> — <t t-esc="row.delivery_end"/></small><span t-if="!row.available" class="text-warning">Outside latest catalogue</span></td>
-                                <td><strong t-esc="row.market"/><small><t t-esc="row.currency || '—'"/> / <t t-esc="row.price_unit || '—'"/></small><small>Volume: <t t-esc="row.volume_unit || '—'"/></small></td>
-                                <td t-foreach="state.data.columns" t-as="column" t-key="column.key" class="text-end eex-number" t-att-title="detail(feed(row, column.key))"><span t-att-class="(['stale', 'error', 'paused'].includes(feed(row, column.key).status) ? 'text-warning ' : '') + (isChanged(row, column.key) ? 'eex-value-changed' : '')" t-esc="value(row, column.key)"/></td>
-                                <td class="eex-feed-status"><div class="eex-feed-line" t-foreach="['stat','tob','spr']" t-as="kind" t-key="kind" t-att-title="detail(row.feeds[kind])" t-att-aria-label="detail(row.feeds[kind])"><span t-att-class="'eex-dot eex-' + row.feeds[kind].status"/><strong class="eex-feed-label" t-esc="kind === 'stat' ? 'Stats' : kind === 'tob' ? 'Bid/ask' : 'Settlement'"/><span t-esc="label(row.feeds[kind].status)"/><small class="eex-feed-time" t-esc="shortTime(row.feeds[kind])"/></div></td>
+                                <td t-foreach="state.data.columns" t-as="column" t-key="column.key" t-att-class="cellClass(row, column)" t-att-title="title(row, column)">
+                                    <span t-if="column.type === 'status'" t-att-class="'eex-dot eex-' + rawValue(row, column)"/>
+                                    <strong t-if="column.key === 'name'" t-esc="value(row, column)"/>
+                                    <span t-else="" t-att-class="isChanged(row, column.key) ? 'eex-value-changed' : ''" t-esc="value(row, column)"/>
+                                </td>
                             </tr></tbody>
                         </table>
                     </div>
                     <div t-else="" class="eex-empty-state"><i class="fa fa-list-alt"/><h2>Choose your futures</h2><p>Add instruments from the catalogue to start following their prices.</p><button t-if="state.data.can_edit" class="btn btn-primary" t-on-click="edit">Select instruments</button></div>
-                    <p class="eex-footnote">The board checks Odoo every 15 seconds while this page is visible. EEX collection follows the configured target interval, subject to queue load and EEX limits. Changed values are highlighted for 30 seconds after a board check. “—” means unavailable; settlement prices are for the displayed trading date. History contains sampled observations collected since activation.</p>
+                    <p class="eex-footnote">The board checks Odoo's cache every <t t-esc="state.data.board_refresh_interval"/> seconds while this page is visible; this check never calls EEX. EEX collection follows the watchlist target and administrator minimum, subject to queue load and EEX limits. Changed numeric values are highlighted for 30 seconds. “—” means unavailable; settlement prices are for the displayed trading date.</p>
                 </t>
                 <div t-else="" class="eex-empty-state"><i class="fa fa-line-chart"/><h2>A watchlist for your markets</h2><p>Create a personal selection of futures, choose your columns, and set a collection interval.</p><button class="btn btn-primary" t-on-click="create">Create watchlist</button></div>
             </t>

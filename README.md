@@ -7,7 +7,7 @@ An installable Odoo 16 Community/Enterprise add-on for self-hosted installations
 - EEX DataSource REST **v2**, Bearer authentication, fixed official API origin.
 - Discovery of commodities, areas, trading dates and outright futures by ISIN.
 - Last/open/high/low prices and volume (`stat`), bid/ask (`tob`), settlement (`spr`).
-- User-owned watchlists; optional company sharing grants read/refresh/export access, not editing rights. EEX administrators can manage all watchlists in their allowed companies.
+- User-owned watchlists with configurable columns for contract identity, delivery, units, every collected price/volume value, and per-feed diagnostics. Optional company sharing grants read/refresh/export access, not editing rights.
 - One shared market request per feed, regardless of how many users select that market. Cache stores selected instruments only.
 - Background collection, configurable intervals, manual refresh requests, retries/backoff and job diagnostics.
 - Per-feed status, trading date, source timestamp where supplied, and fetch timestamp. Missing prices remain missing; zero and negative prices remain valid.
@@ -31,7 +31,7 @@ The Odoo scheduled action **EEX: schedule and collect market data** must remain 
 
 ## Refresh and retention
 
-The collector runs once per minute. Watchlists default to 300 seconds; `0` means manual collection. Administrators enforce a minimum of at least 60 seconds. Intervals are targets, not latency guarantees. Manual refresh queues work and obeys the same minimum. Open boards reread the **database cache** every 15 seconds while visible; they do not call EEX. A visible countdown and progress bar show the next cache check, while a second progress indicator shows feed collection. Board timestamps are always UTC. Changed values remain highlighted for 30 seconds after a board check; initial loads and newly added instruments establish a baseline without highlighting.
+The collector runs once per minute. Watchlists default to 300 seconds; `0` means manual collection. Administrators enforce a minimum of at least 60 seconds. Intervals are targets, not latency guarantees. Manual refresh queues work and obeys the same minimum. Open boards reread the **database cache** at a company-wide configurable interval (60 seconds by default); they do not call EEX. A visible countdown and progress bar show the next cache check, while a second progress indicator shows feed collection. Board timestamps are always UTC. Changed values remain highlighted for 30 seconds after a board check; initial loads and newly added instruments establish a baseline without highlighting.
 
 The worker processes at most 20 jobs per run, with a 40-second soft budget and 1.1-second spacing before every request. A database advisory lock serializes workers and enqueue actions. HTTP 429 pauses all pending jobs; transient failures retry up to five attempts. A job that failed because the server token was absent resumes automatically once the token is restored and the watchlist is due. Invalid or expired credentials, missing entitlements, malformed responses and truncation still require administrator attention and an explicit retry. Successful feeds remain independent of failed feeds.
 

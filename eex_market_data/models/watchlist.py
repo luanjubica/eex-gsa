@@ -5,8 +5,51 @@ import pytz
 from odoo import api, fields, models, _
 from odoo.exceptions import AccessError, ValidationError
 
-METRICS = [('last', 'Last'), ('bid', 'Bid'), ('ask', 'Ask'), ('settlement', 'Settlement'),
-           ('volume', 'Volume'), ('open', 'Open'), ('high', 'High'), ('low', 'Low')]
+INSTRUMENT_COLUMNS = [
+    ('name', 'Instrument', 'instrument', 'name', 'text'),
+    ('long_name', 'Description', 'instrument', 'long_name', 'text'),
+    ('short_code', 'Short code', 'instrument', 'short_code', 'text'),
+    ('isin', 'ISIN', 'instrument', 'isin', 'text'),
+    ('market', 'Market', 'instrument', 'market', 'text'),
+    ('commodity', 'Commodity', 'instrument', 'commodity', 'text'),
+    ('area', 'Area', 'instrument', 'area', 'text'),
+    ('maturity', 'Maturity', 'instrument', 'maturity', 'text'),
+    ('maturity_type', 'Maturity type', 'instrument', 'maturity_type', 'text'),
+    ('delivery_start', 'Delivery start', 'instrument', 'delivery_start', 'date'),
+    ('delivery_end', 'Delivery end', 'instrument', 'delivery_end', 'date'),
+    ('expiry_date', 'Expiry date', 'instrument', 'expiry_date', 'date'),
+    ('currency', 'Currency', 'instrument', 'currency', 'text'),
+    ('price_unit', 'Price unit', 'instrument', 'price_unit', 'text'),
+    ('volume_unit', 'Volume unit', 'instrument', 'volume_unit', 'text'),
+    ('available', 'Catalogue status', 'instrument', 'available', 'availability'),
+    ('reference_date', 'Catalogue date', 'instrument', 'reference_date', 'date'),
+]
+METRIC_COLUMNS = [
+    ('last', 'Last', 'stat', 'last', 'number'),
+    ('bid', 'Bid', 'tob', 'bid', 'number'),
+    ('ask', 'Ask', 'tob', 'ask', 'number'),
+    ('settlement', 'Settlement', 'spr', 'settlement', 'number'),
+    ('volume', 'Volume', 'stat', 'volume', 'number'),
+    ('open', 'Open', 'stat', 'open', 'number'),
+    ('high', 'High', 'stat', 'high', 'number'),
+    ('low', 'Low', 'stat', 'low', 'number'),
+]
+FEED_COLUMNS = [
+    ('stat_status', 'Statistics status', 'stat', 'status', 'status'),
+    ('stat_trade_date', 'Statistics trading date', 'stat', 'trade_date', 'date'),
+    ('stat_source_at', 'Statistics source (UTC)', 'stat', 'source_at', 'datetime'),
+    ('stat_fetched_at', 'Statistics fetched (UTC)', 'stat', 'fetched_at', 'datetime'),
+    ('tob_status', 'Bid / ask status', 'tob', 'status', 'status'),
+    ('tob_trade_date', 'Bid / ask trading date', 'tob', 'trade_date', 'date'),
+    ('tob_source_at', 'Bid / ask source (UTC)', 'tob', 'source_at', 'datetime'),
+    ('tob_fetched_at', 'Bid / ask fetched (UTC)', 'tob', 'fetched_at', 'datetime'),
+    ('spr_status', 'Settlement status', 'spr', 'status', 'status'),
+    ('spr_trade_date', 'Settlement trading date', 'spr', 'trade_date', 'date'),
+    ('spr_source_at', 'Settlement source (UTC)', 'spr', 'source_at', 'datetime'),
+    ('spr_fetched_at', 'Settlement fetched (UTC)', 'spr', 'fetched_at', 'datetime'),
+]
+BOARD_COLUMNS = INSTRUMENT_COLUMNS + METRIC_COLUMNS + FEED_COLUMNS
+BOARD_COLUMN_FIELDS = ['show_' + column[0] for column in BOARD_COLUMNS]
 HISTORY_METRICS = [('last', 'Close / last'), ('settlement', 'Settlement'), ('open', 'Open'),
                    ('high', 'High'), ('low', 'Low'), ('volume', 'Volume')]
 
@@ -26,14 +69,43 @@ class EexWatchlist(models.Model):
     refresh_interval = fields.Integer(default=300, string='Collection interval (seconds; 0 = manual)')
     refresh_requested = fields.Boolean(readonly=True, default=True, copy=False)
     last_scheduled = fields.Datetime(readonly=True, copy=False)
-    show_last = fields.Boolean(default=True)
-    show_bid = fields.Boolean(default=True)
-    show_ask = fields.Boolean(default=True)
-    show_settlement = fields.Boolean(default=True)
-    show_volume = fields.Boolean(default=True)
-    show_open = fields.Boolean(default=False)
-    show_high = fields.Boolean(default=False)
-    show_low = fields.Boolean(default=False)
+    show_name = fields.Boolean(string='Instrument', default=True)
+    show_long_name = fields.Boolean(string='Description', default=True)
+    show_short_code = fields.Boolean(string='Short code')
+    show_isin = fields.Boolean(string='ISIN')
+    show_market = fields.Boolean(string='Market', default=True)
+    show_commodity = fields.Boolean(string='Commodity')
+    show_area = fields.Boolean(string='Area')
+    show_maturity = fields.Boolean(string='Maturity', default=True)
+    show_maturity_type = fields.Boolean(string='Maturity type')
+    show_delivery_start = fields.Boolean(string='Delivery start', default=True)
+    show_delivery_end = fields.Boolean(string='Delivery end', default=True)
+    show_expiry_date = fields.Boolean(string='Expiry date')
+    show_currency = fields.Boolean(string='Currency', default=True)
+    show_price_unit = fields.Boolean(string='Price unit', default=True)
+    show_volume_unit = fields.Boolean(string='Volume unit', default=True)
+    show_available = fields.Boolean(string='Catalogue status')
+    show_reference_date = fields.Boolean(string='Catalogue date')
+    show_last = fields.Boolean(string='Last', default=True)
+    show_bid = fields.Boolean(string='Bid', default=True)
+    show_ask = fields.Boolean(string='Ask', default=True)
+    show_settlement = fields.Boolean(string='Settlement', default=True)
+    show_volume = fields.Boolean(string='Volume', default=True)
+    show_open = fields.Boolean(string='Open', default=False)
+    show_high = fields.Boolean(string='High', default=False)
+    show_low = fields.Boolean(string='Low', default=False)
+    show_stat_status = fields.Boolean(string='Statistics status', default=True)
+    show_stat_trade_date = fields.Boolean(string='Statistics trading date')
+    show_stat_source_at = fields.Boolean(string='Statistics source timestamp')
+    show_stat_fetched_at = fields.Boolean(string='Statistics fetched timestamp', default=True)
+    show_tob_status = fields.Boolean(string='Bid / ask status', default=True)
+    show_tob_trade_date = fields.Boolean(string='Bid / ask trading date')
+    show_tob_source_at = fields.Boolean(string='Bid / ask source timestamp')
+    show_tob_fetched_at = fields.Boolean(string='Bid / ask fetched timestamp', default=True)
+    show_spr_status = fields.Boolean(string='Settlement status', default=True)
+    show_spr_trade_date = fields.Boolean(string='Settlement trading date')
+    show_spr_source_at = fields.Boolean(string='Settlement source timestamp')
+    show_spr_fetched_at = fields.Boolean(string='Settlement fetched timestamp', default=True)
 
     @api.constrains('refresh_interval', 'instrument_ids', 'owner_id', 'company_id')
     def _validate_watchlist(self):
@@ -44,6 +116,12 @@ class EexWatchlist(models.Model):
                 raise ValidationError(_('A watchlist can contain at most 500 instruments.'))
             if record.company_id not in record.owner_id.company_ids:
                 raise ValidationError(_('The owner must belong to the watchlist company.'))
+
+    @api.constrains(*BOARD_COLUMN_FIELDS)
+    def _validate_board_columns(self):
+        for record in self:
+            if not any(record[field_name] for field_name in BOARD_COLUMN_FIELDS):
+                raise ValidationError(_('Select at least one market board column.'))
 
     @api.model_create_multi
     def create(self, vals_list):
@@ -172,10 +250,13 @@ class EexWatchlist(models.Model):
             return result
         watchlist._check_read()
         connection = self.env['eex.connection'].sudo().search([('company_id', '=', watchlist.company_id.id)], limit=1)
-        columns = [{'key': key, 'label': label} for key, label in METRICS if watchlist['show_' + key]]
+        columns = [{'key': key, 'label': label, 'source': source, 'field': field, 'type': value_type}
+                   for key, label, source, field, value_type in BOARD_COLUMNS
+                   if watchlist['show_' + key]]
         result.update(selected=watchlist.id, name=watchlist.name, columns=columns,
                       refresh_interval=watchlist.refresh_interval,
                       minimum_refresh=connection.minimum_refresh if connection else 60,
+                      board_refresh_interval=connection.board_refresh_interval if connection else 60,
                       timing=connection.data_timing if connection else 'unknown',
                       enabled=bool(connection and connection.enabled),
                       pending=watchlist.refresh_requested,
@@ -244,9 +325,14 @@ class EexWatchlist(models.Model):
                                'fetched_at': fields.Datetime.to_string(quote.fetched_at) if quote else None,
                                'message': job.message if job else None}
             result['rows'].append({'id': instrument.id, 'name': instrument.name, 'long_name': instrument.long_name,
-                'market': instrument.market_id.name, 'currency': instrument.currency, 'price_unit': instrument.price_unit,
+                'short_code': instrument.short_code, 'isin': instrument.isin,
+                'market': instrument.market_id.name, 'commodity': instrument.commodity, 'area': instrument.area,
+                'maturity': instrument.maturity, 'maturity_type': instrument.maturity_type,
+                'currency': instrument.currency, 'price_unit': instrument.price_unit,
                 'volume_unit': instrument.volume_unit, 'available': instrument.available,
                 'delivery_start': str(instrument.delivery_start) if instrument.delivery_start else '',
                 'delivery_end': str(instrument.delivery_end) if instrument.delivery_end else '',
+                'expiry_date': str(instrument.expiry_date) if instrument.expiry_date else '',
+                'reference_date': str(instrument.reference_date) if instrument.reference_date else '',
                 'feeds': feeds})
         return result

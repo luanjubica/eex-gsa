@@ -25,30 +25,19 @@ class EexExport(http.Controller):
         sheet = book.add_worksheet('Watchlist')
         header = book.add_format({'bold': True, 'bg_color': '#173B49', 'font_color': '#FFFFFF'})
         price = book.add_format({'num_format': '#,##0.0000;[Red]-#,##0.0000'})
-        columns = ['Instrument', 'Market', 'Currency', 'Price unit', 'Volume unit', 'Delivery start', 'Delivery end']
-        columns += [column['label'] for column in data['columns']]
-        for label in ('Statistics', 'Bid / ask', 'Settlement'):
-            columns += [label + ' status', label + ' trade date', label + ' source time (UTC)', label + ' fetched (UTC)']
+        columns = [column['label'] for column in data['columns']]
         sheet.write_row(0, 0, columns, header)
         for index, row in enumerate(data['rows'], 1):
-            values = [row.get(key) or '' for key in ('name', 'market', 'currency', 'price_unit', 'volume_unit', 'delivery_start', 'delivery_end')]
-            sheet.write_row(index, 0, values)
-            column_index = len(values)
-            for column in data['columns']:
-                key = column['key']
-                kind = 'tob' if key in ('bid', 'ask') else 'spr' if key == 'settlement' else 'stat'
-                value = row['feeds'][kind]['values'].get(key)
+            for column_index, column in enumerate(data['columns']):
+                value = self._board_value(row, column)
                 if value is not None:
-                    sheet.write_number(index, column_index, value, price)
-                column_index += 1
-            for kind in ('stat', 'tob', 'spr'):
-                feed = row['feeds'][kind]
-                sheet.write_row(index, column_index, [feed.get(key) or '' for key in ('status', 'trade_date', 'source_at', 'fetched_at')])
-                column_index += 4
-        sheet.freeze_panes(1, 2)
+                    if column['type'] == 'number':
+                        sheet.write_number(index, column_index, value, price)
+                    else:
+                        sheet.write(index, column_index, value)
+        sheet.freeze_panes(1, 1)
         sheet.autofilter(0, 0, len(data['rows']), len(columns) - 1)
-        sheet.set_column(0, 1, 26)
-        sheet.set_column(2, len(columns) - 1, 20)
+        sheet.set_column(0, max(0, len(columns) - 1), 20)
         note = book.add_worksheet('About')
         note.set_column(0, 0, 105)
         for index, line in enumerate([
@@ -63,6 +52,25 @@ class EexExport(http.Controller):
             note.write_string(index, 0, line)
         book.close()
         return self._response(output, 'eex-watchlist-%s.xlsx' % watchlist.id)
+
+    @staticmethod
+    def _board_value(row, column):
+        if column['source'] == 'instrument':
+            value = row.get(column['field'])
+        else:
+            feed = row['feeds'][column['source']]
+            value = (feed.get('values') or {}).get(column['field']) if column['type'] == 'number' \
+                    else feed.get(column['field'])
+        if column['type'] == 'status':
+            return {'ok': 'Available', 'waiting': 'Awaiting data', 'empty': 'No data',
+                    'stale': 'Stale cache', 'previous_day': 'Earlier trading day',
+                    'error': 'Collection error', 'disabled': 'Feed disabled',
+                    'paused': 'Collection paused'}.get(value, value or '')
+        if column['type'] == 'availability':
+            return 'Available' if value else 'Outside latest catalogue'
+        if column['type'] == 'datetime' and value:
+            return value + ' UTC'
+        return value if value not in (None, '') else None
 
     @http.route('/eex/watchlist/<int:watchlist_id>/history/export', type='http', auth='user', methods=['GET'])
     def export_history(self, watchlist_id):

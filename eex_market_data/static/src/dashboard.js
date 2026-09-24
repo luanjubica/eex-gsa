@@ -10,7 +10,7 @@ export class EexDashboard extends Component {
         this.notification = useService('notification');
         this.state = useState({
             data: null, error: '', busy: false, checkedAt: '', changedCells: {},
-            secondsUntilCheck: 15, checkProgress: 0,
+            secondsUntilCheck: 60, checkProgress: 0,
         });
         this.selected = this.props.action.params?.watchlist_id || false;
         this.alive = true;
@@ -24,15 +24,17 @@ export class EexDashboard extends Component {
         onWillUnmount(() => { this.alive = false; clearInterval(this.timer); });
     }
     scheduleNextCheck() {
-        this.nextCheckAt = Date.now() + 15000;
-        this.state.secondsUntilCheck = 15;
+        const seconds = this.state.data?.board_refresh_interval || 60;
+        this.pollDuration = seconds * 1000;
+        this.nextCheckAt = Date.now() + this.pollDuration;
+        this.state.secondsUntilCheck = seconds;
         this.state.checkProgress = 0;
     }
     tick() {
         if (document.hidden || !this.nextCheckAt) return;
         const remaining = Math.max(0, this.nextCheckAt - Date.now());
         this.state.secondsUntilCheck = Math.ceil(remaining / 1000);
-        this.state.checkProgress = Math.min(100, Math.round(100 * (15000 - remaining) / 15000));
+        this.state.checkProgress = Math.min(100, Math.round(100 * (this.pollDuration - remaining) / this.pollDuration));
         if (!remaining && !this.state.busy) this.load();
     }
     async load() {
@@ -60,8 +62,13 @@ export class EexDashboard extends Component {
         }
     }
     cellKey(row, key) { return `${row.id}:${key}`; }
-    rawValue(row, key) {
-        const value = this.feed(row, key).values[key];
+    feedForColumn(row, column) {
+        return column.source === 'instrument' ? null : row.feeds[column.source];
+    }
+    rawValue(row, column) {
+        const feed = this.feedForColumn(row, column);
+        const value = column.source === 'instrument' ? row[column.field] :
+            column.type === 'number' ? feed.values[column.field] : feed[column.field];
         return value === undefined ? null : value;
     }
     trackChanges(data) {
@@ -77,9 +84,9 @@ export class EexDashboard extends Component {
         for (const row of data.rows) {
             for (const column of data.columns) {
                 const key = this.cellKey(row, column.key);
-                const value = this.value(row, column.key);
+                const value = this.value(row, column);
                 snapshot[key] = value;
-                if (sameWatchlist && this.previousValues &&
+                if (column.type === 'number' && sameWatchlist && this.previousValues &&
                         Object.prototype.hasOwnProperty.call(this.previousValues, key) &&
                         this.previousValues[key] !== value) {
                     changed[key] = now + 30000;
@@ -119,16 +126,34 @@ export class EexDashboard extends Component {
     }
     export() { window.location.assign(`/eex/watchlist/${this.selected}/export`); }
     exportHistory() { window.location.assign(`/eex/watchlist/${this.selected}/history/export`); }
-    feed(row, key) { return row.feeds[key === 'settlement' ? 'spr' : ['bid', 'ask'].includes(key) ? 'tob' : 'stat']; }
-    value(row, key) {
-        const value = this.rawValue(row, key);
-        return value === null ? '—' : new Intl.NumberFormat(undefined, { maximumFractionDigits: key === 'volume' ? 2 : 4 }).format(value);
+    value(row, column) {
+        const value = this.rawValue(row, column);
+        if (value === null || value === '' || value === false && column.type !== 'availability') return '—';
+        if (column.type === 'number') return new Intl.NumberFormat(undefined, {
+            maximumFractionDigits: column.field === 'volume' ? 2 : 4,
+        }).format(value);
+        if (column.type === 'status') return this.label(value);
+        if (column.type === 'availability') return value ? 'Available' : 'Outside latest catalogue';
+        if (column.type === 'datetime') return value + ' UTC';
+        return value;
     }
     label(status) {
         return { ok: 'Available', waiting: 'Awaiting data', empty: 'No data', stale: 'Stale cache',
             previous_day: 'Earlier trading day', error: 'Collection error', disabled: 'Feed disabled', paused: 'Collection paused' }[status] || status;
     }
     shortTime(feed) { return feed.fetched_at ? feed.fetched_at.slice(11, 19) : '—'; }
+    cellClass(row, column) {
+        const feed = this.feedForColumn(row, column);
+        return [column.type === 'number' ? 'text-end eex-number' : '',
+            ['date', 'datetime'].includes(column.type) ? 'eex-time-cell' : '',
+            column.type === 'text' ? 'eex-text-cell' : '',
+            feed && ['stale', 'error', 'paused'].includes(feed.status) ? 'text-warning' : '',
+        ].filter(Boolean).join(' ');
+    }
+    title(row, column) {
+        const feed = this.feedForColumn(row, column);
+        return feed ? this.detail(feed) : '';
+    }
     detail(feed) {
         return `${this.label(feed.status)}\nTrading date: ${feed.trade_date || '—'}\nSource: ${feed.source_at ? feed.source_at + ' UTC' : 'Not supplied'}\nFetched: ${feed.fetched_at ? feed.fetched_at + ' UTC' : '—'}${feed.message ? '\n' + feed.message : ''}`;
     }
