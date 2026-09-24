@@ -22,12 +22,16 @@ class EexClient:
         self.session = session or requests.Session()
         self.sleep = sleep
 
-    def get(self, *segments, listing=False):
+    def get(self, *segments, listing=False, params=None):
         if not self.token or '\n' in self.token or '\r' in self.token:
             raise EexError(MISSING_TOKEN_MESSAGE)
-        if not segments or segments[0] not in ('rd', 'stat', 'tob', 'spr'):
+        if not segments or segments[0] not in ('rd', 'stat', 'tob', 'spr', 'stats', 'tobs', 'sprs'):
             raise EexError('Unsupported EEX endpoint.')
         path = '/'.join(quote(str(part), safe='') for part in segments)
+        params = params or {}
+        allowed_params = {'from', 'to', 'instrumentType', 'timeFrom', 'timeTo', 'limit', 'fields'}
+        if not isinstance(params, dict) or set(params) - allowed_params:
+            raise EexError('Unsupported EEX request parameters.')
         if listing:
             path += '/'
         # All callers run under the database-wide worker lock. Waiting before
@@ -38,6 +42,7 @@ class EexClient:
                 BASE_URL + '/' + path,
                 headers={'Authorization': 'Bearer ' + self.token, 'Accept': 'application/json'},
                 timeout=(5, 20), allow_redirects=False,
+                params=params,
             )
         except requests.RequestException:
             raise EexError('EEX request failed or timed out.', retryable=True) from None

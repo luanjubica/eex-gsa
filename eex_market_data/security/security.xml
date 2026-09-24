@@ -58,6 +58,10 @@
         <field name="name">History: allowed companies</field><field name="model_id" ref="model_eex_snapshot"/>
         <field name="domain_force">[('company_id', 'in', company_ids)]</field>
     </record>
+    <record id="historical_company_rule" model="ir.rule">
+        <field name="name">API history: allowed companies</field><field name="model_id" ref="model_eex_historical"/>
+        <field name="domain_force">[('company_id', 'in', company_ids)]</field>
+    </record>
     <record id="job_company_rule" model="ir.rule">
         <field name="name">Jobs: allowed companies</field><field name="model_id" ref="model_eex_job"/>
         <field name="domain_force">[('company_id', 'in', company_ids)]</field>

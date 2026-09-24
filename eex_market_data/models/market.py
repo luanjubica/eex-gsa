@@ -1,6 +1,11 @@
+from datetime import timedelta
+
 from odoo import api, fields, models, _
 from odoo.exceptions import AccessError
 from odoo.osv import expression
+
+METRICS = [(x, x.title()) for x in ('last', 'open', 'high', 'low', 'volume', 'bid', 'ask', 'settlement')]
+FEEDS = [('stat', 'Statistics'), ('tob', 'Bid / ask'), ('spr', 'Settlement')]
 
 
 class EexMarket(models.Model):
@@ -17,6 +22,7 @@ class EexMarket(models.Model):
     trade_date = fields.Date(readonly=True)
     dates_checked_at = fields.Datetime(readonly=True)
     catalogue_checked_at = fields.Datetime(readonly=True)
+    history_requested = fields.Boolean(default=True, readonly=True)
     _sql_constraints = [('market_unique', 'unique(connection_id, commodity, area)', 'Market already exists.')]
 
     @api.depends('commodity', 'area')
@@ -76,7 +82,7 @@ class EexQuote(models.Model):
 
     instrument_id = fields.Many2one('eex.instrument', required=True, ondelete='cascade', index=True)
     company_id = fields.Many2one(related='instrument_id.company_id', store=True, index=True)
-    kind = fields.Selection([('stat', 'Statistics'), ('tob', 'Bid / ask'), ('spr', 'Settlement')], required=True)
+    kind = fields.Selection(FEEDS, required=True)
     trade_date = fields.Date(required=True)
     values_json = fields.Json()
     source_at = fields.Datetime(string='Source timestamp')
@@ -98,14 +104,41 @@ class EexSnapshot(models.Model):
     trade_date = fields.Date(required=True)
     captured_at = fields.Datetime(required=True, index=True)
     source_at = fields.Datetime()
-    metric = fields.Selection([(x, x.title()) for x in ('last', 'open', 'high', 'low', 'volume', 'bid', 'ask', 'settlement')], required=True)
+    metric = fields.Selection(METRICS, required=True)
     value = fields.Float(digits=(20, 6), group_operator='avg')
     currency = fields.Char(related='instrument_id.currency', store=True)
     price_unit = fields.Char(related='instrument_id.price_unit', store=True)
 
     @api.autovacuum
     def _gc_history(self):
-        from datetime import timedelta
         for connection in self.env['eex.connection'].sudo().with_context(active_test=False).search([]):
             cutoff = fields.Datetime.now() - timedelta(days=connection.retention_days)
             self.sudo().search([('company_id', '=', connection.company_id.id), ('captured_at', '<', cutoff)]).unlink()
+
+
+class EexHistorical(models.Model):
+    _name = 'eex.historical'
+    _description = 'EEX API Daily History'
+    _order = 'trade_date desc, instrument_id, metric'
+
+    instrument_id = fields.Many2one('eex.instrument', required=True, ondelete='cascade', index=True)
+    company_id = fields.Many2one(related='instrument_id.company_id', store=True, index=True)
+    market_id = fields.Many2one(related='instrument_id.market_id', store=True, index=True)
+    kind = fields.Selection(FEEDS, required=True, index=True)
+    trade_date = fields.Date(required=True, index=True)
+    metric = fields.Selection(METRICS, required=True, index=True)
+    value = fields.Float(digits=(20, 6), group_operator='avg')
+    source_at = fields.Datetime(string='Source timestamp')
+    fetched_at = fields.Datetime(required=True)
+    currency = fields.Char(related='instrument_id.currency', store=True)
+    price_unit = fields.Char(related='instrument_id.price_unit', store=True)
+    volume_unit = fields.Char(related='instrument_id.volume_unit', store=True)
+
+    _sql_constraints = [('historical_unique', 'unique(instrument_id, kind, trade_date, metric)',
+                         'This daily historical value is already stored.')]
+
+    @api.autovacuum
+    def _gc_api_history(self):
+        for connection in self.env['eex.connection'].sudo().with_context(active_test=False).search([]):
+            cutoff = fields.Date.today() - timedelta(days=connection.retention_days)
+            self.sudo().search([('company_id', '=', connection.company_id.id), ('trade_date', '<', cutoff)]).unlink()

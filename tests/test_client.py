@@ -46,6 +46,19 @@ class TestClient(unittest.TestCase):
         self.response.status_code = 404
         self.assertEqual(self.api.get('rd', 'derivatives', listing=True), [])
 
+    def test_historical_endpoints_are_allowed(self):
+        params = {'from': '2026-09-15', 'to': '2026-09-22', 'instrumentType': 'Simple Instrument'}
+        self.api.get('stats', 'derivatives', 'POWER', 'DE', params=params)
+        self.assertEqual(self.session.get.call_args[0][0],
+                         'https://api.eex-group.com/v2/stats/derivatives/POWER/DE')
+        self.assertEqual(self.session.get.call_args.kwargs['params'], params)
+        self.api.get('sprs', 'derivatives', 'POWER', 'DE', params=params)
+
+    def test_unknown_query_parameter_is_rejected(self):
+        with self.assertRaisesRegex(client.EexError, 'Unsupported EEX request parameters'):
+            self.api.get('stats', 'derivatives', 'POWER', 'DE', params={'token': 'never'})
+        self.session.get.assert_not_called()
+
     def test_truncation_rejected(self):
         self.response.json.return_value = [{}] * 60000
         with self.assertRaises(client.EexError):

@@ -96,7 +96,12 @@ export class EexDashboard extends Component {
         const action = await this.orm.call('eex.watchlist', 'action_history', [[this.selected]]);
         return this.action.doAction(action);
     }
+    async loadHistory() {
+        const result = await this.orm.call('eex.watchlist', 'action_history_refresh', [[this.selected]]);
+        this.notification.add(result.params.message, { type: result.params.type });
+    }
     export() { window.location.assign(`/eex/watchlist/${this.selected}/export`); }
+    exportHistory() { window.location.assign(`/eex/watchlist/${this.selected}/history/export`); }
     feed(row, key) { return row.feeds[key === 'settlement' ? 'spr' : ['bid', 'ask'].includes(key) ? 'tob' : 'stat']; }
     value(row, key) {
         const value = this.rawValue(row, key);

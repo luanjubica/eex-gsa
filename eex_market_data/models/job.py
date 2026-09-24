@@ -14,7 +14,9 @@ _logger = logging.getLogger(__name__)
 WORKER_LOCK = 1162170674
 KINDS = [('commodities', 'Discover commodities'), ('areas', 'Discover areas'),
          ('dates', 'Discover trade dates'), ('catalogue', 'Synchronize instruments'),
-         ('stat', 'Statistics'), ('tob', 'Bid / ask'), ('spr', 'Settlement')]
+         ('stat', 'Statistics'), ('tob', 'Bid / ask'), ('spr', 'Settlement'),
+         ('hist_stat', 'Historical statistics'), ('hist_spr', 'Historical settlement')]
+HISTORY_ENDPOINTS = {'hist_stat': ('stats', 'stat'), 'hist_spr': ('sprs', 'spr')}
 
 
 class EexJob(models.Model):
@@ -26,7 +28,10 @@ class EexJob(models.Model):
     connection_id = fields.Many2one('eex.connection', required=True, ondelete='cascade')
     company_id = fields.Many2one(related='connection_id.company_id', store=True, index=True)
     market_id = fields.Many2one('eex.market', ondelete='cascade')
+    instrument_id = fields.Many2one('eex.instrument', ondelete='cascade')
     commodity = fields.Char()
+    history_from = fields.Date(readonly=True, index=True)
+    history_to = fields.Date(readonly=True, index=True)
     kind = fields.Selection(KINDS, required=True)
     state = fields.Selection([('pending', 'Queued'), ('done', 'Completed'), ('failed', 'Needs attention')], default='pending', required=True)
     next_run = fields.Datetime(default=fields.Datetime.now, required=True, index=True)
@@ -37,18 +42,29 @@ class EexJob(models.Model):
     _sql_constraints = [('job_unique', 'unique(name)', 'Collection job already exists.')]
 
     @api.model
-    def _enqueue(self, connection, kind, market=None, commodity=None):
+    def _enqueue(self, connection, kind, market=None, commodity=None, instrument=None,
+                 history_from=None, history_to=None, repeat=True):
         # Serializes enqueue with collection across Odoo workers. Private method:
         # only validated admin actions and the cron scheduler can reach it.
         self.env.cr.execute('SELECT pg_advisory_xact_lock(%s)', [WORKER_LOCK])
         name = '%s:%s:%s:%s' % (connection.id, kind, market.id if market else 0, commodity or '')
+        if instrument:
+            name += ':' + str(instrument.id)
         job = self.search([('name', '=', name)], limit=1)
         if not job:
             return self.create({'name': name, 'connection_id': connection.id, 'kind': kind,
-                                'market_id': market.id if market else False, 'commodity': commodity})
+                                'market_id': market.id if market else False, 'commodity': commodity,
+                                'instrument_id': instrument.id if instrument else False,
+                                'history_from': history_from, 'history_to': history_to})
+        range_changed = bool(history_from and history_to and
+                             (job.history_from != history_from or job.history_to != history_to))
+        if range_changed:
+            job.write({'history_from': history_from, 'history_to': history_to})
         restored_token = (job.state == 'failed' and job.message == MISSING_TOKEN_MESSAGE
                           and bool(connection._token()))
-        if job.state == 'done' or restored_token:
+        if job.state == 'done' and not repeat and not range_changed:
+            return job
+        if job.state == 'done' or restored_token or range_changed:
             earliest = (job.last_attempt or fields.Datetime.now()) + timedelta(seconds=connection.minimum_refresh)
             job.write({'state': 'pending', 'attempts': 0, 'message': False,
                        'next_run': max(fields.Datetime.now(), earliest)})
@@ -160,6 +176,20 @@ class EexJob(models.Model):
                 raise EexError('No available trading date for this market.', retryable=True)
             market.write({'trade_date': max(eligible), 'dates_checked_at': fields.Datetime.now()})
             self._enqueue(connection, 'catalogue', market)
+            if connection.retain_history:
+                history_dates = sorted(value for value in eligible if value < today)[-connection.history_backfill_days:]
+                force = market.history_requested
+                if history_dates:
+                    lists = self.env['eex.watchlist'].search([
+                        ('company_id', '=', connection.company_id.id)])
+                    instruments = lists.mapped('instrument_ids').filtered(
+                        lambda instrument: instrument.market_id == market)
+                    for instrument in instruments:
+                        for kind in set(connection._feeds()) & {'stat', 'spr'}:
+                            self._enqueue(connection, 'hist_' + kind, market, instrument=instrument,
+                                          history_from=history_dates[0], history_to=history_dates[-1],
+                                          repeat=force)
+                market.history_requested = False
         elif self.kind == 'catalogue':
             if not market.trade_date:
                 raise EexError('Discover trading dates first.')
@@ -185,6 +215,18 @@ class EexJob(models.Model):
             market.catalogue_checked_at = fields.Datetime.now()
             for kind in connection._feeds():
                 self._enqueue(connection, kind, market)
+        elif self.kind in HISTORY_ENDPOINTS:
+            endpoint, base_kind = HISTORY_ENDPOINTS[self.kind]
+            instrument = self.instrument_id
+            if (base_kind not in connection._feeds() or not instrument or
+                    not self.history_from or not self.history_to):
+                return
+            rows = client.get(endpoint, 'derivatives', market.commodity, market.area,
+                              instrument.short_code, instrument.maturity, params={
+                'from': str(self.history_from), 'to': str(self.history_to),
+                'instrumentType': 'Simple Instrument',
+            })
+            self._store_history(rows, base_kind)
         else:
             if self.kind not in connection._feeds():
                 return
@@ -192,6 +234,42 @@ class EexJob(models.Model):
                 raise EexError('Discover trading dates first.')
             rows = client.get(self.kind, 'derivatives', market.commodity, market.area, market.trade_date)
             self._store_quotes(rows)
+
+
+    def _store_history(self, rows, kind):
+        now = fields.Datetime.now()
+        market = self.market_id
+        instruments = self.instrument_id
+        instruments_by_isin = {instrument.isin: instrument for instrument in instruments}
+        latest = {}
+        for row in rows:
+            values = quote_values(row, kind)
+            if values is None or row.get('Cmdty') != market.commodity or row.get('Area') != market.area:
+                continue
+            trade_date = fields.Date.to_date(row.get('TrdDate'))
+            if not trade_date or not self.history_from <= trade_date <= self.history_to:
+                raise EexError('EEX returned a trading date outside the requested history range; stored history preserved.')
+            isin = row.get('InstrumentISIN')
+            if isin not in instruments_by_isin:
+                continue
+            timestamp = utc_timestamp(row.get('Tm'))
+            key = (isin, trade_date)
+            previous = latest.get(key)
+            if previous and previous[1] and timestamp and timestamp < previous[1]:
+                continue
+            latest[key] = (values, timestamp)
+        History = self.env['eex.historical']
+        for (isin, trade_date), (payload, source_at) in latest.items():
+            instrument = instruments_by_isin[isin]
+            for metric, value in payload.items():
+                if value is None:
+                    continue
+                domain = [('instrument_id', '=', instrument.id), ('kind', '=', kind),
+                          ('trade_date', '=', trade_date), ('metric', '=', metric)]
+                values = {'instrument_id': instrument.id, 'kind': kind, 'trade_date': trade_date,
+                          'metric': metric, 'value': value, 'source_at': source_at, 'fetched_at': now}
+                existing = History.search(domain, limit=1)
+                existing.write(values) if existing else History.create(values)
 
     def _store_quotes(self, rows):
         now = fields.Datetime.now()

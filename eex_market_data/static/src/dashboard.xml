@@ -11,7 +11,7 @@
                 <t t-if="state.data.selected">
                     <div class="eex-toolbar">
                         <div><label for="eex-watchlist-select">Watchlist</label><select id="eex-watchlist-select" class="form-select" t-on-change="select"><option t-foreach="state.data.watchlists" t-as="item" t-key="item.id" t-att-value="item.id" t-att-selected="item.id === state.data.selected"><t t-esc="item.name"/></option></select></div>
-                        <div class="eex-actions"><button class="btn btn-outline-primary" t-on-click="refresh" t-att-disabled="state.busy"><i class="fa fa-refresh me-2"/>Request refresh</button><button t-if="state.data.can_edit" class="btn btn-outline-secondary" t-on-click="edit">Edit watchlist</button><button class="btn btn-outline-secondary" t-on-click="history">History</button><button class="btn btn-outline-secondary" t-on-click="export">Export Excel</button></div>
+                        <div class="eex-actions"><button class="btn btn-outline-primary" t-on-click="refresh" t-att-disabled="state.busy"><i class="fa fa-refresh me-2"/>Request refresh</button><button t-if="state.data.can_edit" class="btn btn-outline-secondary" t-on-click="edit">Edit watchlist</button><button class="btn btn-outline-secondary" t-on-click="history">Daily history</button><button class="btn btn-outline-secondary" t-on-click="loadHistory">Load history</button><button class="btn btn-outline-secondary" t-on-click="exportHistory">Export history</button><button class="btn btn-outline-secondary" t-on-click="export">Export board</button></div>
                     </div>
                     <div class="eex-summary">
                         <div><span>Instruments</span><strong t-esc="state.data.rows.length"/></div>

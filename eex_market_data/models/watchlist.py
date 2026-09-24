@@ -86,10 +86,28 @@ class EexWatchlist(models.Model):
 
     def action_history(self):
         self._check_read()
-        return {'type': 'ir.actions.act_window', 'name': _('Sampled price history'), 'res_model': 'eex.snapshot',
-                'view_mode': 'graph,tree,pivot', 'domain': [('instrument_id', 'in', self.instrument_ids.ids)],
-                'context': {'search_default_metric': 1, 'search_default_instrument': 1,
-                            'search_default_last_price': 1}}
+        return {'type': 'ir.actions.act_window', 'name': _('EEX daily history'), 'res_model': 'eex.historical',
+                'view_mode': 'graph,tree,pivot',
+                'views': [(False, 'graph'), (False, 'tree'), (False, 'pivot')],
+                'domain': [('instrument_id', 'in', self.instrument_ids.ids)],
+                'context': {'search_default_last_price': 1, 'fill_temporal': False}}
+
+    def action_history_refresh(self):
+        self._check_read()
+        markets = self.instrument_ids.mapped('market_id').filtered('enabled')
+        markets.sudo().write({'history_requested': True})
+        for market in markets:
+            self.env['eex.job'].sudo()._enqueue(market.connection_id, 'dates', market)
+        connection = self.env['eex.connection'].sudo().search([('company_id', '=', self.company_id.id)], limit=1)
+        days = connection.history_backfill_days if connection else 10
+        return {'type': 'ir.actions.client', 'tag': 'display_notification', 'params': {
+            'title': _('History queued'),
+            'message': _('The last %s available trading days will load in the background.') % days,
+            'type': 'success', 'sticky': False}}
+
+    def action_history_export(self):
+        self._check_read()
+        return {'type': 'ir.actions.act_url', 'url': '/eex/watchlist/%s/history/export' % self.id, 'target': 'self'}
 
     @api.model
     def dashboard_data(self, watchlist_id=False):

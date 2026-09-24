@@ -29,8 +29,11 @@ class TestEexMarketData(TransactionCase):
         return dict({'InstrumentISIN': self.instrument.isin, 'InstrumentType': 'Simple Instrument',
             'Cmdty': 'POWER', 'Area': 'DE', 'TrdDate': str(self.market.trade_date)}, **values)
 
-    def job(self, kind='stat'):
-        return self.env['eex.job']._enqueue(self.connection, kind, self.market)
+    def job(self, kind='stat', history_from=None, history_to=None, repeat=True):
+        return self.env['eex.job']._enqueue(self.connection, kind, self.market,
+                                            instrument=self.instrument if kind.startswith('hist_') else None,
+                                            history_from=history_from, history_to=history_to,
+                                            repeat=repeat)
 
     def test_private_shared_and_read_only_access(self):
         other = self.watchlist.with_user(self.bob)
@@ -77,6 +80,54 @@ class TestEexMarketData(TransactionCase):
         job._store_quotes([])
         self.assertEqual(quote.status, 'empty')
         self.assertFalse(quote.values_json)
+
+    def test_api_history_backfill_and_upsert(self):
+        history_date = fields.Date.today() - timedelta(days=1)
+        job = self.job('hist_stat', history_from=history_date, history_to=history_date, repeat=False)
+        row = self.row(TrdDate=str(history_date), LastPx=75.5, OpenPx=70, TotTrdVol=None)
+        job._store_history([row], 'stat')
+        values = self.env['eex.historical'].search([('instrument_id', '=', self.instrument.id)])
+        self.assertEqual(set(values.mapped('metric')), {'last', 'open'})
+        self.assertEqual(values.filtered(lambda value: value.metric == 'last').value, 75.5)
+        job._store_history([dict(row, LastPx=76.25)], 'stat')
+        last = self.env['eex.historical'].search([('instrument_id', '=', self.instrument.id),
+                                                  ('metric', '=', 'last')])
+        self.assertEqual(len(last), 1)
+        self.assertEqual(last.value, 76.25)
+
+    def test_dates_enqueue_latest_historical_trading_days_once(self):
+        self.connection.history_backfill_days = 2
+        today = fields.Date.today()
+        dates = [str(today - timedelta(days=value)) for value in (4, 3, 2, 0)]
+        with patch('odoo.addons.eex_market_data.models.job.EexClient.get', return_value=dates):
+            self.job('dates')._execute()
+        historical = self.env['eex.job'].search([('kind', 'like', 'hist_%')])
+        self.assertEqual(len(historical), 2)
+        self.assertEqual(set(historical.mapped('history_from')), {today - timedelta(days=3)})
+        self.assertEqual(set(historical.mapped('history_to')), {today - timedelta(days=2)})
+        historical.write({'state': 'done'})
+        self.market.history_requested = False
+        with patch('odoo.addons.eex_market_data.models.job.EexClient.get', return_value=dates):
+            self.job('dates')._execute()
+        self.assertTrue(all(job.state == 'done' for job in historical))
+        newer_dates = [str(today - timedelta(days=value)) for value in (3, 2, 1, 0)]
+        with patch('odoo.addons.eex_market_data.models.job.EexClient.get', return_value=newer_dates):
+            self.job('dates')._execute()
+        self.assertTrue(all(job.state == 'pending' for job in historical))
+        self.assertEqual(set(historical.mapped('history_from')), {today - timedelta(days=2)})
+        self.assertEqual(set(historical.mapped('history_to')), {today - timedelta(days=1)})
+
+    def test_history_action_queues_refresh_and_opens_api_history(self):
+        self.market.history_requested = False
+        result = self.watchlist.action_history_refresh()
+        self.assertTrue(self.market.history_requested)
+        self.assertEqual(result['params']['type'], 'success')
+        action = self.watchlist.action_history()
+        self.assertEqual(action['res_model'], 'eex.historical')
+        self.assertEqual([view_type for _view_id, view_type in action['views']], ['graph', 'tree', 'pivot'])
+        self.assertEqual(action['context'], {'search_default_last_price': 1, 'fill_temporal': False})
+        self.assertIn(self.instrument.id, action['domain'][0][2])
+        self.assertIn('/history/export', self.watchlist.action_history_export()['url'])
 
     def test_shared_queue_deduplicates(self):
         self.env['eex.watchlist'].with_user(self.bob).create({'name': 'Bob', 'instrument_ids': [(6, 0, self.instrument.ids)]})
@@ -158,3 +209,6 @@ class TestEexMarketData(TransactionCase):
         with self.assertRaises(ValidationError):
             with self.env.cr.savepoint():
                 self.watchlist.write({'refresh_interval': 2})
+        with self.assertRaises(ValidationError):
+            with self.env.cr.savepoint():
+                self.connection.write({'history_backfill_days': 0})

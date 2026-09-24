@@ -25,6 +25,7 @@ class EexConnection(models.Model):
     collect_spr = fields.Boolean(default=True, string='Settlement prices')
     retain_history = fields.Boolean(default=True, string='Store sampled history')
     history_interval = fields.Integer(default=3600, string='History sample interval (seconds)')
+    history_backfill_days = fields.Integer(default=10, string='API history trading days')
     retention_days = fields.Integer(default=90, string='History retention (days)')
     market_ids = fields.One2many('eex.market', 'connection_id')
 
@@ -35,7 +36,8 @@ class EexConnection(models.Model):
         for record in self:
             record.token_configured = bool(os.environ.get(record.token_env or ''))
 
-    @api.constrains('token_env', 'minimum_refresh', 'stale_after', 'history_interval', 'retention_days')
+    @api.constrains('token_env', 'minimum_refresh', 'stale_after', 'history_interval',
+                    'history_backfill_days', 'retention_days')
     def _validate_settings(self):
         for record in self:
             if not re.fullmatch(r'EEX_[A-Z0-9_]+', record.token_env or ''):
@@ -44,6 +46,8 @@ class EexConnection(models.Model):
                 raise ValidationError(_('Minimum refresh must be at least 60 seconds; stale threshold must be no shorter.'))
             if record.history_interval < 60 or record.retention_days < 1:
                 raise ValidationError(_('History interval must be at least 60 seconds and retention at least one day.'))
+            if not 1 <= record.history_backfill_days <= 366:
+                raise ValidationError(_('API history must cover between 1 and 366 trading days.'))
 
     def _token(self):
         self.ensure_one()

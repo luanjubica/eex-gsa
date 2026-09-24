@@ -11,7 +11,8 @@ An installable Odoo 16 Community/Enterprise add-on for self-hosted installations
 - One shared market request per feed, regardless of how many users select that market. Cache stores selected instruments only.
 - Background collection, configurable intervals, manual refresh requests, retries/backoff and job diagnostics.
 - Per-feed status, trading date, source timestamp where supplied, and fetch timestamp. Missing prices remain missing; zero and negative prices remain valid.
-- Optional sampled history, retention, native Odoo graphs/pivots, and authenticated XLSX export.
+- EEX API daily history with native Odoo tables, graphs and pivots, plus authenticated XLSX exports shaped like the former add-in output.
+- Optional intraday sampling and configurable retention for both sampled and EEX API history.
 - Token read from a server environment variable; never stored in Odoo fields or returned to the browser.
 
 ## Installation on the client's server
@@ -36,7 +37,9 @@ The worker processes at most 20 jobs per run, with a 40-second soft budget and 1
 
 Use one collector per EEX account. The advisory lock cannot coordinate separate Odoo databases, servers or other software using the same EEX account; these must share an external limiter or separate authorized account allocation.
 
-Sampled history defaults to one observation per hour and 90-day retention. Odoo autovacuum performs retention cleanup. Sampling and collection are separate. History is **not** exchange tick history or a historical backfill. Graphs aggregate samples as daily averages and separate instrument/metric series; the list view shows individual observations. Export native history lists/pivots for further analysis. Settlement corrections update the current cache; earlier collected samples remain an observation audit rather than being rewritten as authoritative settlement history.
+EEX API history defaults to the latest 10 available trading days. The module queries the range-based historical `/stats` and `/sprs` derivatives endpoints for enabled daily feeds, stores values, and exposes them in Odoo list, graph and pivot views. Bid/ask history continues to come from the sampled live cache because EEX top-of-book history is tick-level and contract-specific. Use **Load history** after adding instruments, then **Export history** for one date-by-contract close sheet per market plus a normalized detail sheet. The lookback and retention are configurable; Odoo autovacuum removes records beyond retention.
+
+Intraday sampling remains available and defaults to one observation per hour. It records what Odoo observed during live collection and is distinct from authoritative EEX daily history. Settlement corrections update the daily API-history row when history is loaded again.
 
 ## Data semantics and current scope
 

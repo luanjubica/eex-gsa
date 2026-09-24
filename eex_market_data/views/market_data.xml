@@ -40,4 +40,32 @@
         <field name="arch" type="xml">
             <pivot string="Sampled history (averages)"><field name="instrument_id" type="row"/><field name="metric" type="row"/><field name="captured_at" type="col" interval="day"/><field name="value" type="measure"/></pivot></field>
     </record>
+
+    <record id="view_historical_search" model="ir.ui.view">
+        <field name="name">eex.historical.search</field><field name="model">eex.historical</field>
+        <field name="arch" type="xml">
+            <search><field name="instrument_id"/><field name="market_id"/><field name="metric"/><field name="trade_date"/>
+            <filter name="last_price" string="Close / last" domain="[('metric','=','last')]"/><filter name="settlement" string="Settlement" domain="[('metric','=','settlement')]"/>
+            <group expand="0" string="Group by"><filter name="instrument" string="Instrument" context="{'group_by':'instrument_id'}"/><filter name="market" string="Market" context="{'group_by':'market_id'}"/><filter name="metric" string="Metric" context="{'group_by':'metric'}"/><filter name="date" string="Trading date" context="{'group_by':'trade_date:day'}"/></group></search>
+        </field>
+    </record>
+    <record id="view_historical_graph" model="ir.ui.view">
+        <field name="name">eex.historical.graph</field><field name="model">eex.historical</field>
+        <field name="arch" type="xml">
+            <graph string="EEX daily history" type="line"><field name="trade_date" interval="day"/><field name="instrument_id"/><field name="value" type="measure"/></graph>
+        </field>
+    </record>
+    <record id="view_historical_tree" model="ir.ui.view">
+        <field name="name">eex.historical.tree</field><field name="model">eex.historical</field>
+        <field name="arch" type="xml">
+            <tree create="0" edit="0" delete="0"><field name="trade_date"/><field name="market_id"/><field name="instrument_id"/><field name="metric"/><field name="value"/><field name="currency"/><field name="price_unit"/><field name="volume_unit" optional="hide"/><field name="source_at" optional="hide"/><field name="fetched_at"/></tree>
+        </field>
+    </record>
+    <record id="view_historical_pivot" model="ir.ui.view">
+        <field name="name">eex.historical.pivot</field><field name="model">eex.historical</field>
+        <field name="arch" type="xml">
+            <pivot string="EEX daily history"><field name="instrument_id" type="row"/><field name="metric" type="row"/><field name="trade_date" type="col" interval="day"/><field name="value" type="measure"/></pivot>
+        </field>
+    </record>
+    <record id="action_historical" model="ir.actions.act_window"><field name="name">EEX Daily History</field><field name="res_model">eex.historical</field><field name="view_mode">graph,tree,pivot</field><field name="context">{'search_default_last_price': 1, 'fill_temporal': False}</field></record>
 </odoo>

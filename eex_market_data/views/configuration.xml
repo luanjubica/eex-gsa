@@ -10,10 +10,10 @@
             <form><header><button name="action_discover" type="object" string="Discover markets / Test connection" class="oe_highlight"/></header>
                 <sheet><widget name="web_ribbon" title="Archived" bg_color="bg-danger" attrs="{'invisible': [('active', '=', True)]}"/>
                     <field name="active" invisible="1"/><div class="oe_title"><h1><field name="name"/></h1></div>
-                    <div class="alert alert-info">Set the EEX token in the Odoo server environment. Save and enable collection, discover markets, then enable the markets you need. Discovery and price requests run in the background.</div>
+                    <div class="alert alert-info" role="status">Set the EEX token in the Odoo server environment. Save and enable collection, discover markets, then enable the markets you need. Discovery and price requests run in the background.</div>
                     <group><group string="Connection"><field name="company_id" groups="base.group_multi_company"/><field name="enabled"/><field name="token_env"/><field name="token_configured"/><field name="token_expiry"/><field name="data_timing"/></group>
                         <group string="Collection"><field name="minimum_refresh"/><field name="stale_after"/><field name="collect_stat"/><field name="collect_tob"/><field name="collect_spr"/></group></group>
-                    <group string="Sampled history"><field name="retain_history"/><field name="history_interval"/><field name="retention_days"/></group>
+                    <group string="History"><field name="retain_history"/><field name="history_interval"/><field name="history_backfill_days"/><field name="retention_days"/></group>
                     <div class="text-muted mb-3">Refresh intervals are targets. The worker runs each minute and obeys the shared API request limit. Enable only feeds covered by your subscription. Statistics have no source timestamp; their fetch time is shown separately.</div>
                     <field name="market_ids" readonly="1"><tree><field name="name"/><field name="enabled"/><field name="trade_date"/><field name="catalogue_checked_at"/></tree></field>
                 </sheet>
@@ -30,7 +30,7 @@
     <record id="view_job_tree" model="ir.ui.view">
         <field name="name">eex.job.tree</field><field name="model">eex.job</field>
         <field name="arch" type="xml">
-            <tree create="0" edit="0" delete="0" decoration-danger="state == 'failed'"><field name="connection_id"/><field name="market_id"/><field name="commodity"/><field name="kind"/><field name="state" widget="badge"/><field name="last_success"/><field name="next_run"/><field name="message"/><button name="action_retry" type="object" string="Retry" icon="fa-repeat" attrs="{'invisible': [('state', '!=', 'failed')]}"/></tree></field>
+            <tree create="0" edit="0" delete="0" decoration-danger="state == 'failed'"><field name="connection_id"/><field name="market_id"/><field name="instrument_id" optional="hide"/><field name="commodity"/><field name="kind"/><field name="history_from" optional="show"/><field name="history_to" optional="show"/><field name="state" widget="badge"/><field name="last_success"/><field name="next_run"/><field name="message"/><button name="action_retry" type="object" string="Retry" icon="fa-repeat" attrs="{'invisible': [('state', '!=', 'failed')]}"/></tree></field>
     </record>
     <record id="action_jobs" model="ir.actions.act_window"><field name="name">Collection Jobs</field><field name="res_model">eex.job</field><field name="view_mode">tree</field></record>
 </odoo>
