@@ -6,9 +6,21 @@
     .eex-toolbar { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 16px; margin-bottom: 20px;
         label { display: block; font-weight: 600; font-size: 12px; margin-bottom: 5px; } select { min-width: 250px; } }
     .eex-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-    .eex-summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 22px;
+    .eex-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 14px; margin-bottom: 14px;
         > div { background: white; padding: 18px 20px; border: 1px solid #dfe7e9; border-radius: 8px; }
         span { display: block; color: #71828a; font-size: 12px; margin-bottom: 7px; } strong { font-size: 19px; } }
+    .eex-progress-card { display: grid; grid-template-columns: minmax(230px, 1fr) minmax(260px, 2fr) minmax(220px, 1fr);
+        align-items: center; gap: 18px; padding: 13px 18px; margin-bottom: 22px; background: white;
+        border: 1px solid #dfe7e9; border-radius: 8px; }
+    .eex-progress-copy { strong, span { display: block; } strong { font-size: 13px; } span { color: #71828a; font-size: 11px; margin-top: 3px; } }
+    .eex-progress-track { height: 8px; overflow: hidden; background: #e3eaec; border-radius: 99px; }
+    .eex-progress-bar { display: block; height: 100%; border-radius: inherit; transition: width .25s linear; background: #328578; }
+    .eex-progress-check { background: linear-gradient(90deg, #64b9aa, #26786e); }
+    .eex-progress-queued, .eex-progress-collecting { background: #d59935; }
+    .eex-progress-error { background: #c95b56; }
+    .eex-progress-paused { background: #99a7ac; }
+    .eex-collection-progress { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 9px;
+        span { color: #5b7179; font-size: 11px; white-space: nowrap; } }
     .eex-table-wrap { background: white; border: 1px solid #dfe7e9; border-radius: 8px; overflow: auto; }
     .eex-table { margin: 0; font-size: 13px;
         th { padding: 15px; color: #5b7179; background: #edf3f4; white-space: nowrap; border: 0; }
@@ -28,5 +40,24 @@
     .eex-empty-state { padding: 65px 24px; text-align: center; background: white; border: 1px solid #dfe7e9; border-radius: 8px;
         > i { font-size: 35px; color: #328578; margin-bottom: 20px; } h2 { font-size: 23px; } p { color: #71828a; margin-bottom: 22px; } }
     .eex-footnote { color: #71828a; font-size: 11px; margin-top: 16px; max-width: 1100px; }
-    @media (max-width: 800px) { padding: 18px; .eex-summary { grid-template-columns: repeat(2, 1fr); } .eex-header h1 { font-size: 26px; } }
+    .eex-history-toolbar { align-items: end; }
+    .eex-history-meta { display: flex; flex-direction: column; gap: 4px; color: #71828a; font-size: 12px; }
+    .eex-history-loading { margin: 0 0 14px; color: #328578; font-size: 12px; }
+    .eex-history-section { margin-bottom: 22px; }
+    .eex-history-title { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 9px;
+        h2 { margin: 0; font-size: 18px; } span { color: #71828a; font-size: 12px; } }
+    .eex-history-table {
+        th, td { min-width: 125px; vertical-align: middle; }
+        thead th { position: sticky; top: 0; z-index: 2; }
+        thead small { font-weight: 400; }
+        .eex-date-column { position: sticky; left: 0; z-index: 1; min-width: 120px; width: 120px; background: #f6f9fa; }
+        thead .eex-date-column { z-index: 3; background: #edf3f4; }
+        tbody .eex-date-column { color: #47616b; font-size: 12px; font-weight: 600; border-color: #edf1f2; }
+    }
+    @media (max-width: 800px) {
+        padding: 18px; .eex-summary { grid-template-columns: repeat(2, 1fr); }
+        .eex-header h1 { font-size: 26px; }
+        .eex-progress-card { grid-template-columns: 1fr; gap: 10px; }
+        .eex-history-title { align-items: flex-start; flex-direction: column; gap: 3px; }
+    }
 }

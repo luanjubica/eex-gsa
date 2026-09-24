@@ -17,7 +17,23 @@
                         <div><span>Instruments</span><strong t-esc="state.data.rows.length"/></div>
                         <div><span>Collection target</span><strong><t t-if="state.data.refresh_interval"><t t-esc="Math.max(state.data.refresh_interval, state.data.minimum_refresh)"/> sec</t><t t-else="">Manual</t></strong></div>
                         <div><span>Subscription</span><strong t-esc="state.data.timing === 'realtime' ? 'Real-time' : state.data.timing === 'delayed' ? 'Delayed' : 'Timing unverified'"/></div>
-                        <div><span>Board checked (local)</span><strong t-esc="state.checkedAt || '—'"/></div>
+                        <div><span>Board checked (UTC)</span><strong t-esc="state.checkedAt || '—'"/></div>
+                        <div><span>Feed collection</span><strong t-esc="state.data.collection_progress.label"/></div>
+                    </div>
+                    <div class="eex-progress-card">
+                        <div class="eex-progress-copy">
+                            <strong t-esc="state.busy ? 'Checking Odoo now…' : 'Next board cache check in ' + state.secondsUntilCheck + 's'"/>
+                            <span>Visible board timer · no direct EEX API call</span>
+                        </div>
+                        <div class="eex-progress-track" role="progressbar" aria-label="Time until next board cache check" aria-valuemin="0" aria-valuemax="100" t-att-aria-valuenow="state.checkProgress">
+                            <span class="eex-progress-bar eex-progress-check" t-att-style="'width: ' + state.checkProgress + '%'"/>
+                        </div>
+                        <div class="eex-collection-progress">
+                            <span><t t-esc="state.data.collection_progress.done"/> / <t t-esc="state.data.collection_progress.total"/> feeds</span>
+                            <div class="eex-progress-track" role="progressbar" aria-label="Feed collection progress" aria-valuemin="0" aria-valuemax="100" t-att-aria-valuenow="state.data.collection_progress.percent">
+                                <span t-att-class="'eex-progress-bar eex-progress-' + state.data.collection_progress.status" t-att-style="'width: ' + state.data.collection_progress.percent + '%'"/>
+                            </div>
+                        </div>
                     </div>
                     <div t-if="!state.data.enabled" class="alert alert-warning">Collection is not enabled. An EEX administrator must configure the connection.</div>
                     <div t-if="state.data.pending" class="alert alert-info">A collection refresh has been requested. Prices appear after the background worker completes.</div>
@@ -37,6 +53,37 @@
                 <div t-else="" class="eex-empty-state"><i class="fa fa-line-chart"/><h2>A watchlist for your markets</h2><p>Create a personal selection of futures, choose your columns, and set a collection interval.</p><button class="btn btn-primary" t-on-click="create">Create watchlist</button></div>
             </t>
             <div t-elif="!state.error" class="eex-empty-state">Loading market board…</div>
+        </div>
+    </t>
+    <t t-name="eex_market_data.HistoryDashboard" owl="1">
+        <div class="eex-board eex-history-board">
+            <header class="eex-header">
+                <div><div class="eex-eyebrow">EEX / DAILY HISTORY</div><h1><t t-esc="state.data ? state.data.name : 'Daily history'"/></h1><p>Date-by-instrument values from the EEX history feed.</p></div>
+                <button class="btn btn-outline-primary" t-on-click="back"><i class="fa fa-arrow-left me-2"/>Market board</button>
+            </header>
+            <div t-if="state.error" class="alert alert-danger" role="alert"><t t-esc="state.error"/><button class="btn btn-link" t-on-click="load">Retry</button></div>
+            <t t-if="state.data">
+                <div class="eex-toolbar eex-history-toolbar">
+                    <div><label for="eex-history-metric">Displayed value</label><select id="eex-history-metric" class="form-select" t-on-change="selectMetric" t-att-disabled="state.busy"><option t-foreach="state.data.metrics" t-as="metric" t-key="metric.key" t-att-value="metric.key" t-att-selected="metric.key === state.metric"><t t-esc="metric.label"/></option></select></div>
+                    <div class="eex-history-meta"><span>Latest <t t-esc="state.data.days"/> trading dates</span><span>Updated <t t-esc="state.data.updated_at ? state.data.updated_at + ' UTC' : '—'"/></span></div>
+                    <div class="eex-actions"><button class="btn btn-outline-primary" t-on-click="loadHistory"><i class="fa fa-refresh me-2"/>Load history</button><button class="btn btn-outline-secondary" t-on-click="details">Charts &amp; details</button><button class="btn btn-outline-secondary" t-on-click="exportHistory">Export history</button></div>
+                </div>
+                <div t-if="state.busy" class="eex-history-loading"><i class="fa fa-spinner fa-spin me-2"/>Loading values…</div>
+                <t t-if="state.data.tables.length">
+                    <section class="eex-history-section" t-foreach="state.data.tables" t-as="table" t-key="table.id">
+                        <div class="eex-history-title"><h2 t-esc="table.name"/><span><t t-esc="state.data.metric_label"/> · <t t-esc="table.rows.length"/> dates</span></div>
+                        <div class="eex-table-wrap">
+                            <table class="table eex-table eex-history-table">
+                                <thead><tr><th class="eex-date-column">Trading date</th><th class="text-end" t-foreach="table.instruments" t-as="instrument" t-key="instrument.id"><strong t-esc="instrument.short_code"/><small t-esc="instrument.maturity"/><small><t t-esc="instrument.currency || '—'"/> / <t t-esc="instrument.unit || '—'"/></small></th></tr></thead>
+                                <tbody><tr t-foreach="table.rows" t-as="row" t-key="row.date"><th class="eex-date-column" t-esc="row.date"/><td class="text-end eex-number" t-foreach="row.values" t-as="item" t-key="item_index" t-esc="value(item, state.metric)"/></tr></tbody>
+                            </table>
+                        </div>
+                    </section>
+                </t>
+                <div t-else="" class="eex-empty-state"><i class="fa fa-table"/><h2>No daily history yet</h2><p>Queue the latest EEX trading days, then return when background collection completes.</p><button class="btn btn-primary" t-on-click="loadHistory">Load history</button></div>
+                <p class="eex-footnote">Each market has its own date-by-instrument table. Use the value selector for close, settlement, OHLC, or volume. All update timestamps are UTC.</p>
+            </t>
+            <div t-elif="!state.error" class="eex-empty-state">Loading daily history…</div>
         </div>
     </t>
 </templates>

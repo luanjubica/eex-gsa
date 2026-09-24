@@ -123,11 +123,26 @@ class TestEexMarketData(TransactionCase):
         self.assertTrue(self.market.history_requested)
         self.assertEqual(result['params']['type'], 'success')
         action = self.watchlist.action_history()
-        self.assertEqual(action['res_model'], 'eex.historical')
-        self.assertEqual([view_type for _view_id, view_type in action['views']], ['graph', 'tree', 'pivot'])
-        self.assertEqual(action['context'], {'search_default_last_price': 1, 'fill_temporal': False})
-        self.assertIn(self.instrument.id, action['domain'][0][2])
+        self.assertEqual(action['tag'], 'eex_market_data.history_dashboard')
+        self.assertEqual(action['params']['watchlist_id'], self.watchlist.id)
+        details = self.watchlist.action_history_details()
+        self.assertEqual(details['res_model'], 'eex.historical')
+        self.assertEqual([view_type for _view_id, view_type in details['views']], ['graph', 'tree', 'pivot'])
+        self.assertIn(self.instrument.id, details['domain'][0][2])
         self.assertIn('/history/export', self.watchlist.action_history_export()['url'])
+
+    def test_history_dashboard_returns_date_by_instrument_tables(self):
+        history_date = fields.Date.today() - timedelta(days=1)
+        self.env['eex.historical'].create({
+            'instrument_id': self.instrument.id, 'kind': 'stat', 'trade_date': history_date,
+            'metric': 'last', 'value': 82.75, 'fetched_at': fields.Datetime.now()})
+        data = self.watchlist.with_user(self.alice).history_dashboard_data(self.watchlist.id, 'last')
+        self.assertEqual(data['metric_label'], 'Close / last')
+        self.assertEqual(data['tables'][0]['instruments'][0]['name'], self.instrument.name)
+        self.assertEqual(data['tables'][0]['rows'][0]['date'], str(history_date))
+        self.assertEqual(data['tables'][0]['rows'][0]['values'], [82.75])
+        fallback = self.watchlist.with_user(self.alice).history_dashboard_data(self.watchlist.id, 'invalid')
+        self.assertEqual(fallback['metric'], 'last')
 
     def test_shared_queue_deduplicates(self):
         self.env['eex.watchlist'].with_user(self.bob).create({'name': 'Bob', 'instrument_ids': [(6, 0, self.instrument.ids)]})
@@ -180,6 +195,7 @@ class TestEexMarketData(TransactionCase):
         self.instrument.quote_ids.fetched_at = fields.Datetime.now() - timedelta(hours=2)
         data = self.watchlist.dashboard_data(self.watchlist.id)
         self.assertEqual(data['rows'][0]['feeds']['tob']['status'], 'stale')
+        self.assertIn('collection_progress', data)
 
     def test_catalogue_import_excludes_options_and_spreads(self):
         row = self.row(ShortCode='DEBM', Maturity=202610, ProductType='Future', Currency='EUR', UOM='MWh')

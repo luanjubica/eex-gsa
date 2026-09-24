@@ -8,7 +8,10 @@ export class EexDashboard extends Component {
         this.orm = useService('orm');
         this.action = useService('action');
         this.notification = useService('notification');
-        this.state = useState({ data: null, error: '', busy: false, checkedAt: '', changedCells: {} });
+        this.state = useState({
+            data: null, error: '', busy: false, checkedAt: '', changedCells: {},
+            secondsUntilCheck: 15, checkProgress: 0,
+        });
         this.selected = this.props.action.params?.watchlist_id || false;
         this.alive = true;
         this.sequence = 0;
@@ -16,13 +19,24 @@ export class EexDashboard extends Component {
         this.previousWatchlist = false;
         onWillStart(async () => {
             await this.load();
-            this.timer = setInterval(() => {
-                if (!document.hidden && !this.state.busy) this.load();
-            }, 15000);
+            this.timer = setInterval(() => this.tick(), 250);
         });
         onWillUnmount(() => { this.alive = false; clearInterval(this.timer); });
     }
+    scheduleNextCheck() {
+        this.nextCheckAt = Date.now() + 15000;
+        this.state.secondsUntilCheck = 15;
+        this.state.checkProgress = 0;
+    }
+    tick() {
+        if (document.hidden || !this.nextCheckAt) return;
+        const remaining = Math.max(0, this.nextCheckAt - Date.now());
+        this.state.secondsUntilCheck = Math.ceil(remaining / 1000);
+        this.state.checkProgress = Math.min(100, Math.round(100 * (15000 - remaining) / 15000));
+        if (!remaining && !this.state.busy) this.load();
+    }
     async load() {
+        if (this.state.busy) return;
         const sequence = ++this.sequence;
         this.state.busy = true;
         try {
@@ -30,7 +44,7 @@ export class EexDashboard extends Component {
             if (this.alive && sequence === this.sequence) {
                 this.trackChanges(data);
                 this.state.data = data;
-                this.state.checkedAt = new Date().toLocaleTimeString();
+                this.state.checkedAt = new Date().toISOString().slice(11, 19) + ' UTC';
                 this.selected = data.selected;
                 this.state.error = '';
             }
@@ -39,7 +53,10 @@ export class EexDashboard extends Component {
                 this.state.error = 'Could not load the watchlist. Check your connection and access permissions.';
             }
         } finally {
-            if (this.alive && sequence === this.sequence) this.state.busy = false;
+            if (this.alive && sequence === this.sequence) {
+                this.state.busy = false;
+                this.scheduleNextCheck();
+            }
         }
     }
     cellKey(row, key) { return `${row.id}:${key}`; }
@@ -118,3 +135,56 @@ export class EexDashboard extends Component {
 }
 EexDashboard.template = 'eex_market_data.Dashboard';
 registry.category('actions').add('eex_market_data.dashboard', EexDashboard);
+
+export class EexHistoryDashboard extends Component {
+    setup() {
+        this.orm = useService('orm');
+        this.action = useService('action');
+        this.notification = useService('notification');
+        this.watchlistId = this.props.action.params?.watchlist_id;
+        this.state = useState({ data: null, error: '', busy: false, metric: 'last' });
+        onWillStart(() => this.load());
+    }
+    async load(metric = this.state.metric) {
+        if (this.state.busy) return;
+        this.state.busy = true;
+        try {
+            const data = await this.orm.call(
+                'eex.watchlist', 'history_dashboard_data', [this.watchlistId, metric]
+            );
+            this.state.data = data;
+            this.state.metric = data.metric;
+            this.state.error = '';
+        } catch (error) {
+            this.state.error = 'Could not load daily history. Check your connection and access permissions.';
+        } finally {
+            this.state.busy = false;
+        }
+    }
+    selectMetric(event) { return this.load(event.target.value); }
+    back() {
+        return this.action.doAction({
+            type: 'ir.actions.client', tag: 'eex_market_data.dashboard',
+            params: { watchlist_id: this.watchlistId },
+        });
+    }
+    async details() {
+        const action = await this.orm.call('eex.watchlist', 'action_history_details', [[this.watchlistId]]);
+        return this.action.doAction(action);
+    }
+    async loadHistory() {
+        const result = await this.orm.call('eex.watchlist', 'action_history_refresh', [[this.watchlistId]]);
+        this.notification.add(result.params.message, { type: result.params.type });
+    }
+    exportHistory() {
+        window.location.assign(`/eex/watchlist/${this.watchlistId}/history/export`);
+    }
+    value(value, metric) {
+        if (value === null || value === undefined) return '—';
+        return new Intl.NumberFormat(undefined, {
+            maximumFractionDigits: metric === 'volume' ? 2 : 4,
+        }).format(value);
+    }
+}
+EexHistoryDashboard.template = 'eex_market_data.HistoryDashboard';
+registry.category('actions').add('eex_market_data.history_dashboard', EexHistoryDashboard);

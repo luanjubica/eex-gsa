@@ -7,6 +7,8 @@ from odoo.exceptions import AccessError, ValidationError
 
 METRICS = [('last', 'Last'), ('bid', 'Bid'), ('ask', 'Ask'), ('settlement', 'Settlement'),
            ('volume', 'Volume'), ('open', 'Open'), ('high', 'High'), ('low', 'Low')]
+HISTORY_METRICS = [('last', 'Close / last'), ('settlement', 'Settlement'), ('open', 'Open'),
+                   ('high', 'High'), ('low', 'Low'), ('volume', 'Volume')]
 
 
 class EexWatchlist(models.Model):
@@ -86,6 +88,11 @@ class EexWatchlist(models.Model):
 
     def action_history(self):
         self._check_read()
+        return {'type': 'ir.actions.client', 'tag': 'eex_market_data.history_dashboard',
+                'params': {'watchlist_id': self.id}}
+
+    def action_history_details(self):
+        self._check_read()
         return {'type': 'ir.actions.act_window', 'name': _('EEX daily history'), 'res_model': 'eex.historical',
                 'view_mode': 'graph,tree,pivot',
                 'views': [(False, 'graph'), (False, 'tree'), (False, 'pivot')],
@@ -110,6 +117,51 @@ class EexWatchlist(models.Model):
         return {'type': 'ir.actions.act_url', 'url': '/eex/watchlist/%s/history/export' % self.id, 'target': 'self'}
 
     @api.model
+    def history_dashboard_data(self, watchlist_id, metric='last'):
+        self.check_access_rights('read')
+        watchlist = self.browse(int(watchlist_id)).exists()
+        if not watchlist:
+            return {'name': '', 'metric': metric, 'metrics': [], 'tables': [], 'days': 10, 'updated_at': False}
+        watchlist._check_read()
+        labels = dict(HISTORY_METRICS)
+        if metric not in labels:
+            metric = 'last'
+        connection = self.env['eex.connection'].sudo().search([
+            ('company_id', '=', watchlist.company_id.id)], limit=1)
+        days = connection.history_backfill_days if connection else 10
+        instruments = watchlist.instrument_ids.sorted(
+            lambda instrument: (instrument.market_id.name, instrument.short_code,
+                                instrument.delivery_start or fields.Date.today(), instrument.maturity))
+        history = self.env['eex.historical'].search([
+            ('instrument_id', 'in', instruments.ids)], order='trade_date, instrument_id, metric')
+        tables = []
+        latest_fetch = max(history.mapped('fetched_at'), default=False)
+        for market in instruments.mapped('market_id').sorted('name'):
+            market_instruments = instruments.filtered(lambda instrument: instrument.market_id == market)
+            market_history = history.filtered(lambda row: row.market_id == market)
+            dates = sorted(set(market_history.mapped('trade_date')))[-days:]
+            values = {(row.trade_date, row.instrument_id.id): row.value for row in market_history
+                      if row.metric == metric}
+            tables.append({
+                'id': market.id,
+                'name': market.name,
+                'instruments': [{'id': instrument.id, 'name': instrument.name,
+                                 'short_code': instrument.short_code, 'maturity': instrument.maturity,
+                                 'currency': instrument.currency or '',
+                                 'unit': (instrument.volume_unit if metric == 'volume' else instrument.price_unit) or ''}
+                                for instrument in market_instruments],
+                'rows': [{'date': str(trade_date),
+                          'values': [values.get((trade_date, instrument.id))
+                                     for instrument in market_instruments]}
+                         for trade_date in dates],
+            })
+        return {'name': watchlist.name, 'watchlist_id': watchlist.id, 'metric': metric,
+                'metric_label': labels[metric], 'metrics': [{'key': key, 'label': label}
+                                                            for key, label in HISTORY_METRICS],
+                'tables': tables, 'days': days,
+                'updated_at': fields.Datetime.to_string(latest_fetch) if latest_fetch else False}
+
+    @api.model
     def dashboard_data(self, watchlist_id=False):
         self.check_access_rights('read')
         lists = self.search([])
@@ -131,7 +183,43 @@ class EexWatchlist(models.Model):
         now = fields.Datetime.now()
         today = datetime.now(pytz.timezone('Europe/Berlin')).date()
         jobs = self.env['eex.job'].sudo().search([('market_id', 'in', watchlist.instrument_ids.market_id.ids)])
-        jobs_by_key = {(job.market_id.id, job.kind): job for job in jobs}
+        jobs_by_key = {}
+        for job in jobs:
+            key = (job.market_id.id, job.kind)
+            current = jobs_by_key.get(key)
+            if not current or (job.last_attempt or datetime.min) > (current.last_attempt or datetime.min):
+                jobs_by_key[key] = job
+        enabled_markets = watchlist.instrument_ids.mapped('market_id').filtered('enabled')
+        feed_kinds = connection._feeds() if connection and connection.enabled and connection.active else []
+        expected = [(market.id, kind) for market in enabled_markets for kind in feed_kinds]
+        completed = failed = 0
+        for key in expected:
+            job = jobs_by_key.get(key)
+            attempted = bool(job and watchlist.last_scheduled and job.last_attempt and
+                             job.last_attempt >= watchlist.last_scheduled)
+            if job and (attempted or job.state == 'failed') and job.state in ('done', 'failed'):
+                completed += 1
+                failed += int(job.state == 'failed')
+        total = len(expected)
+        if not connection or not connection.enabled or not connection.active:
+            progress_status, progress_label = 'paused', _('Collection paused')
+        elif watchlist.refresh_requested:
+            progress_status, progress_label = 'queued', _('Queued for collection')
+            completed = 0
+        elif total and completed < total:
+            progress_status = 'collecting'
+            progress_label = _('Collecting %s of %s feeds') % (completed, total)
+        elif failed:
+            progress_status = 'error'
+            progress_label = _('Complete with %s errors') % failed
+        else:
+            progress_status, progress_label = 'complete', _('Collection complete')
+        result['collection_progress'] = {
+            'status': progress_status, 'label': progress_label, 'done': completed, 'total': total,
+            'percent': round(100 * completed / total) if total else 0,
+            'last_scheduled': fields.Datetime.to_string(watchlist.last_scheduled)
+                              if watchlist.last_scheduled else False,
+        }
         for instrument in watchlist.instrument_ids.sorted(lambda i: (i.short_code, i.delivery_start or today, i.maturity)):
             feeds = {}
             for kind in ('stat', 'tob', 'spr'):
