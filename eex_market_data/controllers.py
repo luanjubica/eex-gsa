@@ -53,6 +53,16 @@ class EexExport(http.Controller):
         book.close()
         return self._response(output, 'eex-watchlist-%s.xlsx' % watchlist.id)
 
+    @http.route('/eex/watchlist/<int:watchlist_id>/book/export', type='http', auth='user', methods=['GET'])
+    def export_book(self, watchlist_id):
+        watchlist = self._watchlist(watchlist_id)
+        payload = watchlist._book_yaml().encode('utf-8')
+        return request.make_response(payload, headers=[
+            ('Content-Type', 'application/yaml; charset=utf-8'),
+            ('Content-Disposition', content_disposition('eex-book-%s.yaml' % watchlist.id)),
+            ('Cache-Control', 'no-store'),
+        ])
+
     @staticmethod
     def _board_value(row, column):
         if column['source'] == 'instrument':

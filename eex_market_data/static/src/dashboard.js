@@ -125,6 +125,7 @@ export class EexDashboard extends Component {
         this.notification.add(result.params.message, { type: result.params.type });
     }
     export() { window.location.assign(`/eex/watchlist/${this.selected}/export`); }
+    exportBook() { window.location.assign(`/eex/watchlist/${this.selected}/book/export`); }
     exportHistory() { window.location.assign(`/eex/watchlist/${this.selected}/history/export`); }
     value(row, column) {
         const value = this.rawValue(row, column);

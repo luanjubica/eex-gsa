@@ -130,6 +130,25 @@ class TestEexMarketData(TransactionCase):
         self.assertEqual([view_type for _view_id, view_type in details['views']], ['graph', 'tree', 'pivot'])
         self.assertIn(self.instrument.id, details['domain'][0][2])
         self.assertIn('/history/export', self.watchlist.action_history_export()['url'])
+        self.assertIn('/book/export', self.watchlist.action_book_export()['url'])
+
+    def test_book_yaml_export_matches_eex_data_format(self):
+        self.connection.write({'history_backfill_days': 10, 'retention_days': 400})
+        yaml = self.watchlist._book_yaml()
+        self.assertIn('history_days: 10', yaml)
+        self.assertIn('history_keep_days: 400', yaml)
+        self.assertIn('commodity: POWER', yaml)
+        self.assertIn('market: derivatives', yaml)
+        self.assertIn('  - name: "Private"', yaml)
+        self.assertIn('    area: DE', yaml)
+        self.assertIn('      - /E.DEBMV26', yaml)
+
+        daily = self.env['eex.instrument'].create({
+            'name': 'German day', 'market_id': self.market.id, 'isin': 'DE000TESTDAY',
+            'short_code': 'DB17', 'maturity': '202609', 'maturity_type': 'Day'})
+        self.watchlist.write({'instrument_ids': [(4, daily.id)]})
+        yaml = self.watchlist._book_yaml()
+        self.assertIn('      - /E.DB_DAILY', yaml)
 
     def test_history_dashboard_returns_date_by_instrument_tables(self):
         history_date = fields.Date.today() - timedelta(days=1)

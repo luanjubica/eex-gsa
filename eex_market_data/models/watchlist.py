@@ -1,3 +1,5 @@
+import json
+import re
 from datetime import datetime
 
 import pytz
@@ -52,6 +54,23 @@ BOARD_COLUMNS = INSTRUMENT_COLUMNS + METRIC_COLUMNS + FEED_COLUMNS
 BOARD_COLUMN_FIELDS = ['show_' + column[0] for column in BOARD_COLUMNS]
 HISTORY_METRICS = [('last', 'Close / last'), ('settlement', 'Settlement'), ('open', 'Open'),
                    ('high', 'High'), ('low', 'Low'), ('volume', 'Volume')]
+BOOK_MONTH_CODES = {1: 'F', 2: 'G', 3: 'H', 4: 'J', 5: 'K', 6: 'M',
+                    7: 'N', 8: 'Q', 9: 'U', 10: 'V', 11: 'X', 12: 'Z'}
+BOOK_CONTINUOUS_SYMBOLS = {
+    ('POWER', 'DE', 'day'): '/E.DB_DAILY',
+    ('POWER', 'DE', 'week'): '/E.DEB_WEEK',
+    ('POWER', 'DE', 'weekend'): '/E.DWB_WEEK',
+    ('POWER', 'GR', 'day'): '/E.FF_DAILY',
+    ('POWER', 'GR', 'week'): '/E.FFB_WEEK',
+    ('POWER', 'GR', 'weekend'): '/E.FFW_WEEK',
+    ('POWER', 'IT', 'day'): '/E.FD_DAILY',
+    ('POWER', 'IT', 'week'): '/E.FDB_WEEK',
+    ('POWER', 'IT', 'weekend'): '/E.FDW_WEEK',
+    ('POWER', 'RS', 'week'): '/E.FZB_WEEK',
+    ('POWER', 'HU', 'day'): '/E.F9_DAILY',
+    ('POWER', 'HU', 'week'): '/E.F9B_WEEK',
+    ('POWER', 'HU', 'weekend'): '/E.W9B_WEEK',
+}
 
 
 class EexWatchlist(models.Model):
@@ -163,6 +182,93 @@ class EexWatchlist(models.Model):
     def action_export(self):
         self._check_read()
         return {'type': 'ir.actions.act_url', 'url': '/eex/watchlist/%s/export' % self.id, 'target': 'self'}
+
+    def action_book_export(self):
+        self._check_read()
+        return {'type': 'ir.actions.act_url', 'url': '/eex/watchlist/%s/book/export' % self.id, 'target': 'self'}
+
+    @staticmethod
+    def _book_sheet_name(name):
+        return ''.join('_' if char in '[]:*?/\\' else char for char in (name or 'Board'))[:31] or 'Board'
+
+    @staticmethod
+    def _book_symbol(instrument):
+        commodity = (instrument.commodity or 'POWER').upper()
+        area = (instrument.area or '').upper()
+        maturity_type = (instrument.maturity_type or '').strip().lower()
+        series = False
+        if 'weekend' in maturity_type:
+            series = 'weekend'
+        elif maturity_type in ('day', 'daily'):
+            series = 'day'
+        elif maturity_type in ('week', 'weekly'):
+            series = 'week'
+        continuous = BOOK_CONTINUOUS_SYMBOLS.get((commodity, area, series))
+        if continuous:
+            return continuous
+
+        short_code = (instrument.short_code or '').strip().upper()
+        if not re.fullmatch(r'[A-Z0-9_]+', short_code):
+            raise ValidationError(_('Instrument %s has a short code that cannot be exported.') % instrument.name)
+        maturity = (instrument.maturity or '').strip()
+        match = re.fullmatch(r'(\d{4})(\d{2})', maturity)
+        if not match or int(match.group(2)) not in BOOK_MONTH_CODES:
+            raise ValidationError(_('Instrument %s has a maturity that cannot be exported.') % instrument.name)
+        return '/E.%s%s%s' % (short_code, BOOK_MONTH_CODES[int(match.group(2))], match.group(1)[2:])
+
+    def _book_yaml(self):
+        self.ensure_one()
+        connection = self.env['eex.connection'].sudo().search([('company_id', '=', self.company_id.id)], limit=1)
+        instruments = self.instrument_ids.sorted(
+            lambda instrument: (instrument.commodity, instrument.area, instrument.short_code,
+                                instrument.delivery_start or fields.Date.today(), instrument.maturity))
+        grouped = {}
+        for instrument in instruments:
+            key = ((instrument.commodity or 'POWER').upper(), (instrument.area or '').upper())
+            group = grouped.setdefault(key, [])
+            symbol = self._book_symbol(instrument)
+            if symbol not in group:
+                group.append(symbol)
+
+        default_commodity = next(iter(grouped), ('POWER', ''))[0]
+        lines = [
+            '# Generated from the Odoo EEX market board %s.' % json.dumps(self.name, ensure_ascii=False),
+            '# Save this file as config/book.yaml for the eex-data tool.',
+            'history_days: %s' % (connection.history_backfill_days if connection else 10),
+            'history_keep_days: %s' % (connection.retention_days if connection else 90),
+            'commodity: %s' % default_commodity,
+            'market: derivatives',
+            '',
+        ]
+        if not grouped:
+            lines.append('sheets: []')
+            return '\n'.join(lines) + '\n'
+
+        lines.append('sheets:')
+        multiple = len(grouped) > 1
+        used_names = set()
+        for (commodity, area), symbols in grouped.items():
+            suffix = ' - %s' % area if multiple else ''
+            if multiple and sum(1 for key in grouped if key[1] == area) > 1:
+                suffix += ' - %s' % commodity
+            base = self._book_sheet_name(self.name + suffix)
+            sheet_name = base
+            sequence = 2
+            while sheet_name in used_names:
+                tail = ' %s' % sequence
+                sheet_name = base[:31 - len(tail)] + tail
+                sequence += 1
+            used_names.add(sheet_name)
+            lines.extend([
+                '  - name: %s' % json.dumps(sheet_name, ensure_ascii=False),
+                '    area: %s' % area,
+            ])
+            if commodity != default_commodity:
+                lines.append('    commodity: %s' % commodity)
+            lines.append('    instruments:')
+            lines.extend('      - %s' % symbol for symbol in symbols)
+            lines.append('')
+        return '\n'.join(lines).rstrip() + '\n'
 
     def action_history(self):
         self._check_read()
