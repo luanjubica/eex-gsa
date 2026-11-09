@@ -2,6 +2,7 @@
     <menuitem id="menu_eex_root" name="EEX Market Data" sequence="30" groups="group_eex_user"/>
     <menuitem id="menu_board" name="Market Board" parent="menu_eex_root" action="action_dashboard" sequence="10"/>
     <menuitem id="menu_watchlists" name="Watchlists" parent="menu_eex_root" action="action_watchlists" sequence="20"/>
+    <menuitem id="menu_import_book" name="Import book YAML" parent="menu_eex_root" action="action_book_import" sequence="25"/>
     <menuitem id="menu_history" name="Daily History" parent="menu_eex_root" action="action_historical" sequence="30"/>
     <menuitem id="menu_catalogue" name="Instrument Catalogue" parent="menu_eex_root" action="action_instruments" sequence="40"/>
     <menuitem id="menu_configuration" name="Configuration" parent="menu_eex_root" sequence="90" groups="group_eex_manager"/>

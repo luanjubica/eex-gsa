@@ -4,7 +4,7 @@
         <div class="eex-board">
             <header class="eex-header">
                 <div><div class="eex-eyebrow">EEX / ENERGY FUTURES</div><h1>Market board</h1><p>Your instruments. One shared market feed.</p></div>
-                <button class="btn btn-primary" t-on-click="create"><i class="fa fa-plus me-2"/>New watchlist</button>
+                <div class="eex-actions"><button class="btn btn-outline-primary" t-on-click="importBook"><i class="fa fa-upload me-2"/>Import book YAML</button><button class="btn btn-primary" t-on-click="create"><i class="fa fa-plus me-2"/>New watchlist</button></div>
             </header>
             <div t-if="state.error" class="alert alert-danger" role="alert"><t t-esc="state.error"/><button class="btn btn-link" t-on-click="load">Retry</button></div>
             <t t-if="state.data">
