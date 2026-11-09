@@ -154,10 +154,15 @@ class TestEexMarketData(TransactionCase):
     def test_book_yaml_import_creates_board(self):
         today = fields.Date.today()
         self.instrument.delivery_start = fields.Date.to_date('2026-10-01')
+        self.instrument.available = False
         next_month = self.env['eex.instrument'].create({
             'name': 'DEBM NOV26', 'market_id': self.market.id, 'isin': 'DE000IMPORTNOV',
             'short_code': 'DEBM', 'maturity': '202611',
             'delivery_start': fields.Date.to_date('2026-11-01')})
+        second_month = self.env['eex.instrument'].create({
+            'name': 'DEBM DEC26', 'market_id': self.market.id, 'isin': 'DE000IMPORTDEC',
+            'short_code': 'DEBM', 'maturity': '202612',
+            'delivery_start': fields.Date.to_date('2026-12-01')})
         daily = self.env['eex.instrument'].create({
             'name': 'German day', 'market_id': self.market.id, 'isin': 'DE000IMPORTDAY',
             'short_code': 'DB09', 'maturity': '202611', 'maturity_type': 'Day',
@@ -181,7 +186,7 @@ sheets:
         imported = self.env['eex.watchlist'].with_user(self.alice).search([('name', '=', 'Imported board')])
         self.assertEqual(action['tag'], 'eex_market_data.dashboard')
         self.assertEqual(action['params']['watchlist_id'], imported.id)
-        self.assertEqual(set(imported.instrument_ids.ids), {self.instrument.id, next_month.id, daily.id})
+        self.assertEqual(set(imported.instrument_ids.ids), {self.instrument.id, second_month.id, daily.id})
 
     def test_history_dashboard_returns_date_by_instrument_tables(self):
         history_date = fields.Date.today() - timedelta(days=1)

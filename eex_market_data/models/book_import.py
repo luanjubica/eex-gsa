@@ -76,8 +76,7 @@ class EexBookImportWizard(models.TransientModel):
             root, month_code, short_year = fixed.groups()
             maturity = '%04d%02d' % (2000 + int(short_year), MONTH_CODES[month_code])
             return self.env['eex.instrument'].search([
-                ('market_id', '=', market.id), ('available', '=', True),
-                ('short_code', '=', root), ('maturity', '=', maturity),
+                ('market_id', '=', market.id), ('short_code', '=', root), ('maturity', '=', maturity),
             ], limit=1)
 
         rolling = ROLLING_SYMBOL.fullmatch(normalized)
