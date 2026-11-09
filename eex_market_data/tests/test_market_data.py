@@ -1,3 +1,4 @@
+import base64
 import os
 from datetime import timedelta
 from unittest.mock import patch
@@ -149,6 +150,38 @@ class TestEexMarketData(TransactionCase):
         self.watchlist.write({'instrument_ids': [(4, daily.id)]})
         yaml = self.watchlist._book_yaml()
         self.assertIn('      - /E.DB_DAILY', yaml)
+
+    def test_book_yaml_import_creates_board(self):
+        today = fields.Date.today()
+        self.instrument.delivery_start = fields.Date.to_date('2026-10-01')
+        next_month = self.env['eex.instrument'].create({
+            'name': 'DEBM NOV26', 'market_id': self.market.id, 'isin': 'DE000IMPORTNOV',
+            'short_code': 'DEBM', 'maturity': '202611',
+            'delivery_start': fields.Date.to_date('2026-11-01')})
+        daily = self.env['eex.instrument'].create({
+            'name': 'German day', 'market_id': self.market.id, 'isin': 'DE000IMPORTDAY',
+            'short_code': 'DB09', 'maturity': '202611', 'maturity_type': 'Day',
+            'delivery_start': today, 'delivery_end': today})
+        payload = '''history_days: 10
+history_keep_days: 400
+commodity: POWER
+market: derivatives
+
+sheets:
+  - name: "Imported board"
+    area: DE
+    instruments:
+      - /E.DEBMV26
+      - /E.DEBM<1>
+      - /E.DB_DAILY
+'''
+        wizard = self.env['eex.book.import.wizard'].with_user(self.alice).create({
+            'file_data': base64.b64encode(payload.encode()), 'filename': 'book.yaml'})
+        action = wizard.action_import()
+        imported = self.env['eex.watchlist'].with_user(self.alice).search([('name', '=', 'Imported board')])
+        self.assertEqual(action['tag'], 'eex_market_data.dashboard')
+        self.assertEqual(action['params']['watchlist_id'], imported.id)
+        self.assertEqual(set(imported.instrument_ids.ids), {self.instrument.id, next_month.id, daily.id})
 
     def test_history_dashboard_returns_date_by_instrument_tables(self):
         history_date = fields.Date.today() - timedelta(days=1)

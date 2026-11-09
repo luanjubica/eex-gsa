@@ -7,4 +7,5 @@ access_quote_user,EEX quote user,model_eex_quote,group_eex_user,1,0,0,0
 access_snapshot_user,EEX snapshot user,model_eex_snapshot,group_eex_user,1,0,0,0
 access_historical_user,EEX API history user,model_eex_historical,group_eex_user,1,0,0,0
 access_watchlist_user,EEX watchlist user,model_eex_watchlist,group_eex_user,1,1,1,1
+access_book_import_user,EEX book import user,model_eex_book_import_wizard,group_eex_user,1,1,1,0
 access_job_manager,EEX job administrator,model_eex_job,group_eex_manager,1,0,0,0

@@ -116,6 +116,9 @@ export class EexDashboard extends Component {
         return this.action.doAction({ type: 'ir.actions.act_window', res_model: 'eex.watchlist',
             views: [[false, 'form']], target: 'current' });
     }
+    importBook() {
+        return this.action.doAction('eex_market_data.action_book_import');
+    }
     async history() {
         const action = await this.orm.call('eex.watchlist', 'action_history', [[this.selected]]);
         return this.action.doAction(action);
