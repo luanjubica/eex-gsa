@@ -188,10 +188,6 @@ class EexWatchlist(models.Model):
         return {'type': 'ir.actions.act_url', 'url': '/eex/watchlist/%s/book/export' % self.id, 'target': 'self'}
 
     @staticmethod
-    def _book_sheet_name(name):
-        return ''.join('_' if char in '[]:*?/\\' else char for char in (name or 'Board'))[:31] or 'Board'
-
-    @staticmethod
     def _book_symbol(instrument):
         commodity = (instrument.commodity or 'POWER').upper()
         area = (instrument.area or '').upper()
@@ -223,9 +219,11 @@ class EexWatchlist(models.Model):
             lambda instrument: (instrument.commodity, instrument.area, instrument.short_code,
                                 instrument.delivery_start or fields.Date.today(), instrument.maturity))
         grouped = {}
+        market_names = {}
         for instrument in instruments:
             key = ((instrument.commodity or 'POWER').upper(), (instrument.area or '').upper())
             group = grouped.setdefault(key, [])
+            market_names.setdefault(key, instrument.market_id.name)
             symbol = self._book_symbol(instrument)
             if symbol not in group:
                 group.append(symbol)
@@ -245,20 +243,8 @@ class EexWatchlist(models.Model):
             return '\n'.join(lines) + '\n'
 
         lines.append('sheets:')
-        multiple = len(grouped) > 1
-        used_names = set()
         for (commodity, area), symbols in grouped.items():
-            suffix = ' - %s' % area if multiple else ''
-            if multiple and sum(1 for key in grouped if key[1] == area) > 1:
-                suffix += ' - %s' % commodity
-            base = self._book_sheet_name(self.name + suffix)
-            sheet_name = base
-            sequence = 2
-            while sheet_name in used_names:
-                tail = ' %s' % sequence
-                sheet_name = base[:31 - len(tail)] + tail
-                sequence += 1
-            used_names.add(sheet_name)
+            sheet_name = market_names.get((commodity, area)) or '%s / %s' % (commodity, area)
             lines.extend([
                 '  - name: %s' % json.dumps(sheet_name, ensure_ascii=False),
                 '    area: %s' % area,
