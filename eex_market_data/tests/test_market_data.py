@@ -140,7 +140,8 @@ class TestEexMarketData(TransactionCase):
         self.assertIn('history_keep_days: 400', yaml)
         self.assertIn('commodity: POWER', yaml)
         self.assertIn('market: derivatives', yaml)
-        self.assertIn('  - name: "Private"', yaml)
+        self.assertIn('  - name: "POWER / DE"', yaml)
+        self.assertNotIn('name: "Private"', yaml)
         self.assertIn('    area: DE', yaml)
         self.assertIn('      - /E.DEBMV26', yaml)
 
