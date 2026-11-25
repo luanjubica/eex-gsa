@@ -23,7 +23,7 @@
     <record id="view_snapshot_search" model="ir.ui.view">
         <field name="name">eex.snapshot.search</field><field name="model">eex.snapshot</field>
         <field name="arch" type="xml">
-            <search><field name="instrument_id"/><field name="metric"/><filter name="last_price" string="Last price" domain="[('metric','=','last')]"/><filter name="settlement" string="Settlement" domain="[('metric','=','settlement')]"/><group expand="0" string="Group by"><filter name="instrument" string="Instrument" context="{'group_by':'instrument_id'}"/><filter name="metric" string="Metric" context="{'group_by':'metric'}"/><filter name="currency" string="Currency" context="{'group_by':'currency'}"/></group></search></field>
+            <search><field name="instrument_id"/><field name="metric"/><filter name="last_price" string="Last price" domain="[('metric','=','last')]"/><filter name="settlement_price" string="Settlement close" domain="[('metric','=','settlement')]"/><group expand="0" string="Group by"><filter name="instrument" string="Instrument" context="{'group_by':'instrument_id'}"/><filter name="metric" string="Metric" context="{'group_by':'metric'}"/><filter name="currency" string="Currency" context="{'group_by':'currency'}"/></group></search></field>
     </record>
     <record id="view_snapshot_graph" model="ir.ui.view">
         <field name="name">eex.snapshot.graph</field><field name="model">eex.snapshot</field>
@@ -45,7 +45,7 @@
         <field name="name">eex.historical.search</field><field name="model">eex.historical</field>
         <field name="arch" type="xml">
             <search><field name="instrument_id"/><field name="market_id"/><field name="metric"/><field name="trade_date"/>
-            <filter name="last_price" string="Close / last" domain="[('metric','=','last')]"/><filter name="settlement" string="Settlement" domain="[('metric','=','settlement')]"/>
+            <filter name="last_price" string="Last trade" domain="[('metric','=','last')]"/><filter name="settlement_price" string="Settlement close" domain="[('metric','=','settlement')]"/>
             <group expand="0" string="Group by"><filter name="instrument" string="Instrument" context="{'group_by':'instrument_id'}"/><filter name="market" string="Market" context="{'group_by':'market_id'}"/><filter name="metric" string="Metric" context="{'group_by':'metric'}"/><filter name="date" string="Trading date" context="{'group_by':'trade_date:day'}"/></group></search>
         </field>
     </record>
@@ -67,5 +67,5 @@
             <pivot string="EEX daily history"><field name="instrument_id" type="row"/><field name="metric" type="row"/><field name="trade_date" type="col" interval="day"/><field name="value" type="measure"/></pivot>
         </field>
     </record>
-    <record id="action_historical" model="ir.actions.act_window"><field name="name">EEX Daily History</field><field name="res_model">eex.historical</field><field name="view_mode">graph,tree,pivot</field><field name="context">{'search_default_last_price': 1, 'fill_temporal': False}</field></record>
+    <record id="action_historical" model="ir.actions.act_window"><field name="name">EEX Daily History</field><field name="res_model">eex.historical</field><field name="view_mode">graph,tree,pivot</field><field name="context">{'search_default_settlement_price': 1, 'fill_temporal': False}</field></record>
 </odoo>

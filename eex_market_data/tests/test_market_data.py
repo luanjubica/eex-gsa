@@ -1,6 +1,8 @@
 import base64
 import os
-from datetime import timedelta
+from datetime import datetime, timedelta
+
+import pytz
 from unittest.mock import patch
 from unittest import TestCase
 
@@ -98,12 +100,26 @@ class TestEexMarketData(TransactionCase):
 
     def test_dates_enqueue_latest_historical_trading_days_once(self):
         self.connection.history_backfill_days = 2
+        another = self.env['eex.instrument'].create({
+            'name': 'DEBM NOV26', 'market_id': self.market.id, 'isin': 'DE000BATCHNOV',
+            'short_code': 'DEBM', 'maturity': '202611'})
+        self.watchlist.write({'instrument_ids': [(4, another.id)]})
         today = fields.Date.today()
         dates = [str(today - timedelta(days=value)) for value in (4, 3, 2, 0)]
         with patch('odoo.addons.eex_market_data.models.job.EexClient.get', return_value=dates):
             self.job('dates')._execute()
         historical = self.env['eex.job'].search([('kind', 'like', 'hist_%')])
         self.assertEqual(len(historical), 2)
+        self.assertFalse(historical.instrument_id)
+        stat = historical.filtered(lambda job: job.kind == 'hist_stat')
+        data = [self.row(InstrumentISIN=instrument.isin, TrdDate=str(stat.history_from), LastPx=price)
+                for instrument, price in ((self.instrument, 80), (another, 90))]
+        with patch('odoo.addons.eex_market_data.models.job.EexClient.get', return_value=data) as get:
+            stat._execute()
+        get.assert_called_once()
+        self.assertEqual(get.call_args.args, ('stats', 'derivatives', 'POWER', 'DE'))
+        self.assertEqual(set(self.env['eex.historical'].search([]).mapped('instrument_id').ids),
+                         {self.instrument.id, another.id})
         self.assertEqual(set(historical.mapped('history_from')), {today - timedelta(days=3)})
         self.assertEqual(set(historical.mapped('history_to')), {today - timedelta(days=2)})
         historical.write({'state': 'done'})
@@ -117,6 +133,26 @@ class TestEexMarketData(TransactionCase):
         self.assertTrue(all(job.state == 'pending' for job in historical))
         self.assertEqual(set(historical.mapped('history_from')), {today - timedelta(days=2)})
         self.assertEqual(set(historical.mapped('history_to')), {today - timedelta(days=1)})
+
+    def test_history_sweeps_reuse_covered_sessions_until_scope_changes(self):
+        jobs = self.env['eex.job']
+        today = fields.Date.today()
+        dates = [today - timedelta(days=days) for days in (7, 6, 5, 4, 3)]
+        scope = str(self.instrument.id)
+        job = jobs._enqueue_market_history(self.connection, self.market, 'hist_spr', dates, scope, False)
+        with patch('odoo.addons.eex_market_data.models.job.EexClient.get', return_value=[]):
+            job._run()
+        self.assertEqual(job.state, 'done')
+        advanced = dates[1:] + [today - timedelta(days=1)]
+        job = jobs._enqueue_market_history(self.connection, self.market, 'hist_spr', advanced, scope, False)
+        self.assertEqual(job.history_from, advanced[-3])
+        with patch('odoo.addons.eex_market_data.models.job.EexClient.get', return_value=[]):
+            job._run()
+        jobs._enqueue_market_history(self.connection, self.market, 'hist_spr', advanced, scope, False)
+        self.assertEqual(job.state, 'done')
+        jobs._enqueue_market_history(self.connection, self.market, 'hist_spr', advanced, scope + ',999', False)
+        self.assertEqual(job.history_from, advanced[0])
+        self.assertEqual(job.state, 'pending')
 
     def test_history_action_queues_refresh_and_opens_api_history(self):
         self.market.history_requested = False
@@ -142,7 +178,7 @@ class TestEexMarketData(TransactionCase):
         self.assertIn('market: derivatives', yaml)
         self.assertIn('  - name: "POWER / DE"', yaml)
         self.assertNotIn('name: "Private"', yaml)
-        self.assertIn('    area: DE', yaml)
+        self.assertIn('    area: "DE"', yaml)
         self.assertIn('      - /E.DEBMV26', yaml)
 
         daily = self.env['eex.instrument'].create({
@@ -150,7 +186,7 @@ class TestEexMarketData(TransactionCase):
             'short_code': 'DB17', 'maturity': '202609', 'maturity_type': 'Day'})
         self.watchlist.write({'instrument_ids': [(4, daily.id)]})
         yaml = self.watchlist._book_yaml()
-        self.assertIn('      - /E.DB_DAILY', yaml)
+        self.assertIn('      - /E.DB17U26', yaml)
 
     def test_book_yaml_import_creates_board(self):
         today = fields.Date.today()
@@ -164,6 +200,9 @@ class TestEexMarketData(TransactionCase):
             'name': 'DEBM DEC26', 'market_id': self.market.id, 'isin': 'DE000IMPORTDEC',
             'short_code': 'DEBM', 'maturity': '202612',
             'delivery_start': fields.Date.to_date('2026-12-01')})
+        later_month = self.env['eex.instrument'].create({
+            'name': 'DEBM JAN27', 'market_id': self.market.id, 'isin': 'DE000IMPORTJAN',
+            'short_code': 'DEBM', 'maturity': '202701', 'delivery_start': '2027-01-01'})
         daily = self.env['eex.instrument'].create({
             'name': 'German day', 'market_id': self.market.id, 'isin': 'DE000IMPORTDAY',
             'short_code': 'DB09', 'maturity': '202611', 'maturity_type': 'Day',
@@ -187,20 +226,33 @@ sheets:
         imported = self.env['eex.watchlist'].with_user(self.alice).search([('name', '=', 'Imported board')])
         self.assertEqual(action['tag'], 'eex_market_data.dashboard')
         self.assertEqual(action['params']['watchlist_id'], imported.id)
-        self.assertEqual(set(imported.instrument_ids.ids), {self.instrument.id, second_month.id, daily.id})
+        self.assertEqual(imported.instrument_ids, self.instrument)
+        self.assertEqual(set(imported._effective_instruments().ids), {self.instrument.id, second_month.id, daily.id})
+        self.assertIn('/E.DEBM<1>', imported._book_yaml())
+        with self.assertRaises(AccessError):
+            imported.series_ids.with_user(self.bob).read(['symbol'])
+        next_month.available = False
+        self.market.catalogue_checked_at = fields.Datetime.now()
+        self.assertEqual(set(imported._effective_instruments().ids), {self.instrument.id, later_month.id, daily.id})
 
     def test_history_dashboard_returns_date_by_instrument_tables(self):
         history_date = fields.Date.today() - timedelta(days=1)
         self.env['eex.historical'].create({
             'instrument_id': self.instrument.id, 'kind': 'stat', 'trade_date': history_date,
             'metric': 'last', 'value': 82.75, 'fetched_at': fields.Datetime.now()})
+        self.connection.history_backfill_days = 1
+        for date, value in ((history_date - timedelta(days=1), 96.0), (history_date, 91.25)):
+            self.env['eex.historical'].create({
+                'instrument_id': self.instrument.id, 'kind': 'spr', 'trade_date': date,
+                'metric': 'settlement', 'value': value, 'fetched_at': fields.Datetime.now()})
         data = self.watchlist.with_user(self.alice).history_dashboard_data(self.watchlist.id, 'last')
-        self.assertEqual(data['metric_label'], 'Close / last')
+        self.assertEqual(data['metric_label'], 'Last trade')
         self.assertEqual(data['tables'][0]['instruments'][0]['name'], self.instrument.name)
         self.assertEqual(data['tables'][0]['rows'][0]['date'], str(history_date))
         self.assertEqual(data['tables'][0]['rows'][0]['values'], [82.75])
         fallback = self.watchlist.with_user(self.alice).history_dashboard_data(self.watchlist.id, 'invalid')
-        self.assertEqual(fallback['metric'], 'last')
+        self.assertEqual(fallback['metric'], 'settlement')
+        self.assertEqual(fallback['tables'][0]['rows'], [{'date': str(history_date), 'values': [91.25]}])
 
     def test_shared_queue_deduplicates(self):
         self.env['eex.watchlist'].with_user(self.bob).create({'name': 'Bob', 'instrument_ids': [(6, 0, self.instrument.ids)]})
@@ -295,6 +347,28 @@ sheets:
         with self.assertRaises(EexError):
             job._store_quotes([self.row(LastPx=99, TrdDate='2020-01-01')])
         self.assertEqual(self.instrument.quote_ids.values_json['last'], 50)
+
+    def test_service_fast_stats_and_delta_use_the_authorized_cache(self):
+        jobs = self.env['eex.job']
+        self.connection.fast_last = True
+        self.env['ir.config_parameter'].set_param('eex_market_data.service_collector', '1')
+        self.market.trade_date = datetime.now(pytz.timezone('Europe/Berlin')).date()
+        job = self.job()
+        job.write({'state': 'done', 'last_attempt': fields.Datetime.now() - timedelta(seconds=11)})
+        with patch('odoo.addons.eex_market_data.models.job.EexClient.get') as get:
+            jobs._cron_collect()
+            get.assert_not_called()
+        jobs._schedule_fast_stats()
+        self.assertEqual(job.state, 'pending')
+        with patch('odoo.addons.eex_market_data.models.job.EexClient.get', return_value=[self.row(LastPx=0)]):
+            with patch.object(type(self.env['bus.bus']), '_sendone') as push:
+                job._run()
+        push.assert_called_once_with(self.market._price_channel(), 'eex/latest', self.market.id)
+        delta = self.watchlist.dashboard_latest(self.watchlist.id, [self.market.id])
+        self.assertEqual(delta['rows'][0]['feed']['values']['last'], 0)
+        self.assertEqual(self.watchlist.dashboard_latest(self.watchlist.id, [999999])['rows'], [])
+        with self.assertRaises(AccessError):
+            self.watchlist.with_user(self.bob).dashboard_latest(self.watchlist.id, [self.market.id])
 
     def test_manual_refresh_and_interval_validation(self):
         self.watchlist.write({'refresh_interval': 0})

@@ -10,7 +10,7 @@
                     <field name="name" placeholder="Use first sheet name"/>
                     <field name="refresh_interval"/>
                 </group>
-                <div class="alert alert-info" role="status">The importer creates one board from all sheets. Fixed symbols select the exact contract; rolling and day/week/weekend symbols select the current matching catalogue contract.</div>
+                <div class="alert alert-info" role="status">The importer creates one board from all sheets. Fixed symbols select the exact contract; rolling and day/week/weekend symbols follow the current matching catalogue contract as it rolls.</div>
                 <footer>
                     <button name="action_import" type="object" string="Import and open board" class="btn-primary"/>
                     <button string="Cancel" special="cancel" class="btn-secondary"/>

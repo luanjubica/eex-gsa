@@ -4,7 +4,7 @@ from collections import defaultdict
 import xlsxwriter
 from werkzeug.exceptions import NotFound
 
-from odoo import http
+from odoo import fields, http
 from odoo.http import request, content_disposition
 
 
@@ -74,7 +74,7 @@ class EexExport(http.Controller):
         if column['type'] == 'status':
             return {'ok': 'Available', 'waiting': 'Awaiting data', 'empty': 'No data',
                     'stale': 'Stale cache', 'previous_day': 'Earlier trading day',
-                    'error': 'Collection error', 'disabled': 'Feed disabled',
+                    'error': 'Collection error', 'authentication': 'Authentication failed', 'disabled': 'Feed disabled',
                     'paused': 'Collection paused'}.get(value, value or '')
         if column['type'] == 'availability':
             return 'Available' if value else 'Outside latest catalogue'
@@ -87,9 +87,6 @@ class EexExport(http.Controller):
         watchlist = self._watchlist(watchlist_id)
         connection = request.env['eex.connection'].sudo().search([('company_id', '=', watchlist.company_id.id)], limit=1)
         days = connection.history_backfill_days if connection else 10
-        History = request.env['eex.historical']
-        rows = History.search([('instrument_id', 'in', watchlist.instrument_ids.ids)],
-                              order='trade_date, instrument_id, metric')
         output = io.BytesIO()
         book = xlsxwriter.Workbook(output, {'in_memory': True, 'strings_to_formulas': False, 'strings_to_urls': False})
         title = book.add_format({'bold': True, 'font_size': 14, 'font_color': '#173B49'})
@@ -100,21 +97,24 @@ class EexExport(http.Controller):
         price = book.add_format({'num_format': '#,##0.0000;[Red]-#,##0.0000'})
         used_names = {'History data', 'About'}
         by_market = defaultdict(list)
-        for instrument in watchlist.instrument_ids:
+        details = []
+        for instrument in watchlist._effective_instruments():
             by_market[instrument.market_id].append(instrument)
         for market, instruments in sorted(by_market.items(), key=lambda item: item[0].name):
             sheet_name = self._sheet_name(market.name, used_names)
             sheet = book.add_worksheet(sheet_name)
-            sheet.write(0, 0, '%s — daily close' % market.name, title)
+            sheet.write(0, 0, '%s — settlement close' % market.name, title)
             sheet.write(1, 0, 'Date', header)
-            dates = sorted({row.trade_date for row in rows if row.market_id == market})[-days:]
-            values = {(row.trade_date, row.instrument_id.id): row.value for row in rows
-                      if row.market_id == market and row.metric == 'last'}
+            instruments = request.env['eex.instrument'].browse([instrument.id for instrument in instruments])
+            dates, settlements = watchlist._history_rows(instruments, days, 'settlement')
+            _, market_detail = watchlist._history_rows(instruments, days)
+            details.extend(market_detail)
+            values = {(str(row.trade_date), row.instrument_id.id): row.value for row in settlements}
             for column, instrument in enumerate(instruments, 1):
                 sheet.write(1, column, instrument.name, header)
                 sheet.write(2, column, '%s %s' % (instrument.short_code, instrument.maturity), subheader)
             for index, trade_date in enumerate(dates, 3):
-                sheet.write_datetime(index, 0, trade_date, date_format)
+                sheet.write_datetime(index, 0, fields.Date.to_date(trade_date), date_format)
                 for column, instrument in enumerate(instruments, 1):
                     value = values.get((trade_date, instrument.id))
                     if value is not None:
@@ -126,13 +126,8 @@ class EexExport(http.Controller):
         detail_columns = ['Date', 'Market', 'Instrument', 'Short code', 'Maturity', 'Metric', 'Value',
                           'Currency', 'Unit', 'Source time (UTC)', 'Fetched (UTC)']
         detail.write_row(0, 0, detail_columns, header)
-        allowed_dates = {}
-        for market in by_market:
-            allowed_dates[market.id] = set(sorted({r.trade_date for r in rows if r.market_id == market})[-days:])
         detail_row = 1
-        for row in rows:
-            if row.trade_date not in allowed_dates.get(row.market_id.id, set()):
-                continue
+        for row in details:
             unit = row.volume_unit if row.metric == 'volume' else row.price_unit
             detail.write_datetime(detail_row, 0, row.trade_date, date_format)
             detail.write_row(detail_row, 1, [row.market_id.name, row.instrument_id.name,
@@ -155,7 +150,7 @@ class EexExport(http.Controller):
         for index, line in enumerate([
             'EEX API daily history: ' + watchlist.name,
             'The market sheets follow the supplied add-in pattern: dates in rows and contracts in columns.',
-            'Daily close uses LastPx from the EEX /stats derivatives endpoint.',
+            'Settlement close uses the EEX /sprs settlement price. Last trade from /stats is listed separately in the detail sheet.',
             'The detail sheet includes every stored metric returned by enabled historical feeds.',
             'This export uses the latest %s stored trading days per market and does not call EEX.' % days,
             'Blank cells mean EEX returned no value for that contract and date.',

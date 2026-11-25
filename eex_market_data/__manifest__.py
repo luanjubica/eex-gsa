@@ -1,10 +1,10 @@
 {
     'name': 'EEX Market Data',
     'summary': 'Personal futures watchlists powered by EEX DataSource REST v2',
-    'version': '16.0.7.0.0',
+    'version': '16.0.8.0.0',
     'category': 'Productivity',
     'license': 'LGPL-3',
-    'depends': ['base', 'web'],
+    'depends': ['base', 'web', 'bus'],
     'external_dependencies': {'python': ['requests', 'xlsxwriter']},
     'data': [
         'security/security.xml',
