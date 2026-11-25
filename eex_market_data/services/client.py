@@ -6,6 +6,7 @@ import requests
 
 BASE_URL = 'https://api.eex-group.com/v2'
 MAX_RECORDS = 60000
+INVALID_TOKEN_MESSAGE = 'EEX token is missing, expired or invalid.'
 MISSING_TOKEN_MESSAGE = 'Configure a valid EEX access token on the server.'
 
 
@@ -14,6 +15,10 @@ class EexError(Exception):
         super().__init__(message)
         self.retryable = retryable
         self.retry_after = retry_after
+
+
+class EexTruncation(EexError):
+    pass
 
 
 class EexClient:
@@ -29,7 +34,7 @@ class EexClient:
             raise EexError('Unsupported EEX endpoint.')
         path = '/'.join(quote(str(part), safe='') for part in segments)
         params = params or {}
-        allowed_params = {'from', 'to', 'instrumentType', 'timeFrom', 'timeTo', 'limit', 'fields'}
+        allowed_params = {'from', 'to', 'instrumentType', 'productType', 'timeFrom', 'timeTo', 'limit', 'fields'}
         if not isinstance(params, dict) or set(params) - allowed_params:
             raise EexError('Unsupported EEX request parameters.')
         if listing:
@@ -56,7 +61,7 @@ class EexClient:
                 delay = 60
             raise EexError('EEX rate limit reached. Retrying later.', True, delay)
         errors = {
-            401: 'EEX token is missing, expired or invalid.',
+            401: INVALID_TOKEN_MESSAGE,
             403: 'The EEX subscription does not permit this request.',
             400: 'EEX rejected the request parameters.',
         }
@@ -71,5 +76,5 @@ class EexClient:
         if not isinstance(result, list):
             raise EexError('Unexpected EEX response structure.')
         if len(result) >= MAX_RECORDS:
-            raise EexError('EEX response reached 60,000 records. Narrow the market/product scope before retrying.')
+            raise EexTruncation('EEX response reached 60,000 records. Narrow the market/product scope before retrying.')
         return result

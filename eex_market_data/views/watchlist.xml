@@ -11,7 +11,14 @@
             <field name="active" invisible="1"/><div class="oe_title"><h1><field name="name" placeholder="e.g. Power — next winter"/></h1></div>
             <group><group><field name="owner_id" readonly="1"/><field name="company_id" groups="base.group_multi_company"/><field name="company_id" invisible="1" groups="!base.group_multi_company"/><field name="shared"/></group><group><field name="refresh_interval"/><field name="last_scheduled"/><field name="refresh_requested"/></group></group>
             <div class="alert alert-info" role="status">Choose instruments from the catalogue. Collection continues in the background while your watchlist is active. Set the interval to 0 for manual collection. The administrator's minimum interval also applies.</div>
-            <notebook><page string="Instruments"><field name="instrument_ids" domain="[('company_id','=',company_id),('available','=',True)]" context="{'search_default_available': 1}" options="{'no_create': True}"/></page>
+            <notebook><page string="Fixed instruments"><field name="instrument_ids" domain="[('company_id','=',company_id),('available','=',True)]" context="{'search_default_available': 1}" options="{'no_create': True}"/></page>
+                <page string="Rolling contracts">
+                    <field name="series_ids">
+                        <tree create="0" edit="0">
+                            <field name="market_id"/><field name="symbol"/><field name="instrument_id"/>
+                        </tree>
+                    </field>
+                </page>
                 <page string="Columns">
                     <div class="text-muted mb-2">Choose from 37 available board fields. Keep only the columns needed for a compact working view; the board export uses the same selection.</div>
                     <group string="Instrument and contract"><group><field name="show_name"/><field name="show_long_name"/><field name="show_short_code"/><field name="show_isin"/><field name="show_market"/><field name="show_commodity"/><field name="show_area"/><field name="show_maturity"/><field name="show_maturity_type"/></group><group><field name="show_delivery_start"/><field name="show_delivery_end"/><field name="show_expiry_date"/><field name="show_currency"/><field name="show_price_unit"/><field name="show_volume_unit"/><field name="show_available"/><field name="show_reference_date"/></group></group>

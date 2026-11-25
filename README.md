@@ -27,32 +27,53 @@ An installable Odoo 16 Community/Enterprise add-on for self-hosted installations
 8. Open **Configuration → Markets**, enable the desired markets, and click **Sync catalogue**. The scheduled worker also picks newly enabled markets up automatically. Wait for the catalogue job to finish.
 9. Create a watchlist, add instruments from the catalogue, choose columns and interval, save, then open the market board.
 
-The Odoo scheduled action **EEX: schedule and collect market data** must remain active. A working cron worker and outbound HTTPS to `api.eex-group.com` are required. Allow at least 90 seconds for cron execution in your deployment; normal batches target 40 seconds, with one final request able to exceed that target by its timeout.
+For the default collector, keep the Odoo scheduled action **EEX: schedule and collect market data** active. A working cron worker and outbound HTTPS to `api.eex-group.com` are required. Allow at least 90 seconds for cron execution in your deployment; normal batches target 40 seconds, with one final request able to exceed that target by its timeout.
 
 ## Refresh and retention
 
-The collector runs once per minute. Watchlists default to 300 seconds; `0` means manual collection. Administrators enforce a minimum of at least 60 seconds. Intervals are targets, not latency guarantees. Manual refresh queues work and obeys the same minimum. Open boards reread the **database cache** at a company-wide configurable interval (60 seconds by default); they do not call EEX. A visible countdown and progress bar show the next cache check, while a second progress indicator shows feed collection. Board timestamps are always UTC. Changed values remain highlighted for 30 seconds after a board check; initial loads and newly added instruments establish a baseline without highlighting.
+The default collector runs once per minute. Watchlists default to 300 seconds; `0` means manual collection. Administrators enforce a minimum of at least 60 seconds. Intervals are targets, not latency guarantees. Manual refresh queues work and obeys the same minimum. Open boards reread the **database cache** at a company-wide configurable interval (60 seconds by default); they do not call EEX. A visible countdown and progress bar show the next cache check, while a second progress indicator shows feed collection. Board timestamps are always UTC. Changed values remain highlighted for 30 seconds after a board check; initial loads and newly added instruments establish a baseline without highlighting.
 
-The worker processes at most 20 jobs per run, with a 40-second soft budget and 1.1-second spacing before every request. A database advisory lock serializes workers and enqueue actions. HTTP 429 pauses all pending jobs; transient failures retry up to five attempts. A job that failed because the server token was absent resumes automatically once the token is restored and the watchlist is due. Invalid or expired credentials, missing entitlements, malformed responses and truncation still require administrator attention and an explicit retry. Successful feeds remain independent of failed feeds.
+The worker processes at most 20 jobs per run, with a 40-second soft budget and 1.1-second spacing before every request in cron mode. A database advisory lock serializes workers and enqueue actions. HTTP 429 pauses all pending jobs; transient failures retry up to five attempts. A job that failed because the server token was absent resumes automatically once the token is restored and the watchlist is due. After rotating an invalid or expired token, restart each Odoo process that reads it and click **Retry after token change** on the EEX connection. Check the queued result in **Collection Jobs**. Successful feeds remain independent of failed feeds.
 
 Use one collector per EEX account. The advisory lock cannot coordinate separate Odoo databases, servers or other software using the same EEX account; these must share an external limiter or separate authorized account allocation.
 
-EEX API history defaults to the latest 10 available trading days. The module queries the range-based historical `/stats` and `/sprs` derivatives endpoints for enabled daily feeds, stores values, and presents one date-by-instrument table per market with a selector for close, settlement, OHLC, or volume. Detailed Odoo list, graph, and pivot views remain available. Bid/ask history continues to come from the sampled live cache because EEX top-of-book history is tick-level and contract-specific. Use **Load history** after adding instruments, then **Export history** for one date-by-contract close sheet per market plus a normalized detail sheet. The lookback and retention are configurable; Odoo autovacuum removes records beyond retention.
+EEX API history defaults to the latest 10 available trading days. The module groups backfill into market/date requests to `/stats` and `/sprs` and splits ranges that reach the response limit. After a successful full load for the same instruments, automatic runs fetch new sessions with a two-session overlap for corrections. **Load history** explicitly reloads the configured range. The history board defaults to Settlement close and offers Last trade, OHLC, and volume separately. Settlement close exports use the EEX settlement price. Detailed Odoo list, graph, and pivot views remain available. Bid/ask history continues to come from the sampled live cache because EEX top-of-book history is tick-level and contract-specific. Use **Load history** after adding instruments, then **Export history** for one date-by-contract settlement sheet per market plus a normalized detail sheet. The lookback and retention are configurable; Odoo autovacuum removes records beyond retention.
 
 Intraday sampling remains available and defaults to one observation per hour. It records what Odoo observed during live collection and is distinct from authoritative EEX daily history. Settlement corrections update the daily API-history row when history is loaded again.
 
+## Fast Last pilot
+
+Upgrade `eex_market_data` using the normal Odoo module upgrade. Cron remains the default. To run the dedicated collector:
+
+1. On a staging database, confirm real-time statistics entitlement for the pilot areas and verify that your reverse proxy forwards Odoo 16's `/websocket` route. Start with a 10-second Last target on **Configuration → Connections**.
+2. Set the Odoo system parameter `eex_market_data.service_collector` to `1`. It makes the dedicated process responsible for **all EEX jobs in this database**, including bid/ask, settlement, catalogue and history. Those jobs retain their normal intervals or queue order. Only connections with **Fast Last price** enabled use the faster interval.
+3. Run the collector as the same service user, with the same Odoo configuration and restricted EEX environment file. Copy `scripts/collect_eex.py` to a path accessible to that service user and run the command below. Use a supervised process in the server deployment so it restarts on failure. Keep other applications using the same EEX account out of this pilot unless they share its request budget.
+
+```sh
+/path/to/odoo-venv/bin/python /path/to/odoo-bin shell \
+  -c /etc/odoo/odoo.conf -d YOUR_DATABASE --no-http --max-cron-threads=0 \
+  < /path/to/collect_eex.py
+```
+
+The collector reuses its HTTPS connection, spaces request starts at least 1.1 seconds apart, and commits each job before notifying open boards. The browser rereads statistics for the affected markets. Periodic board checks still reconcile missed notifications and slow feeds. The collection target depends on the number of markets, the EEX entitlement, request latency and other queued jobs.
+
+For acceptance, compare against the client's ExcelTool workbook during active trading. Measure request round-trip time, response-to-render time, and the delay relative to the reference workbook. Test all five markets together, expired and rolling symbols, a connection interruption and token rotation. The proposed one-second target is **from receipt to display**. A one-second trade-to-screen target across all markets requires separate feed validation.
+
+To return to cron, remove the `eex_market_data.service_collector` parameter or set it to `0` and stop the dedicated process. The regular scheduled action resumes on its next run.
+
 ## Data semantics and current scope
 
-- Only `Future` / `Simple Instrument` contracts are imported. Options, spreads, rolling symbols, gas spot, indices and transparency feeds are outside this release.
+- Only `Future` / `Simple Instrument` contracts are imported. Options, spreads, gas spot, indices and transparency feeds are outside this release.
+- YAML imports preserve front/offset and supported day/week/weekend symbols. The catalogue resolves them again after sync, while exact dated entries keep their original contract. Reimport old YAML-created watchlists to recover rolling symbols: earlier versions stored only the resolved contract. History shows the selected outright contracts.
 - ISIN is the stable identity within each company/market catalogue. `Maturity` is not assumed to be the delivery month; actual `Start`/`End` delivery dates are used.
 - Trading dates come from EEX reference data and are compared with Europe/Berlin's calendar. Weekends/holidays use the latest available trading date and are labelled as an earlier trading day. Dates are rechecked on a new Berlin day and at least every six hours.
 - Prices are requested for that trading date. A missing same-day settlement is blank; the system does not silently substitute the previous day's settlement.
 - `LastPx` and `TotTrdVol` are taken from EEX statistics, which include both exchange and trade registration activity. `stat` does not supply an event timestamp; no source time is invented.
 - Settlement's `Tm` is its last correction timestamp, and top-of-book's `Tm` is its last update timestamp. Odoo stores UTC internally; the custom board/export explicitly label UTC.
 - Volume uses EEX's reference UOM. Japanese POWER prices are displayed per kWh despite the reference volume UOM being MWh, as specified by EEX's guide. No currency conversion or contract-size conversion is applied.
-- Staleness means no successful fetch within the larger of the administrator threshold or twice the watchlist interval. Trading date/source age are shown independently. A quiet market is not automatically an API outage.
+- Staleness normally means no successful fetch within the larger of the administrator threshold or twice the watchlist interval. For Fast Last it is three times the Last collection target, with a 30-second floor. Trading date/source age are shown independently. A quiet market is not automatically an API outage.
 - An empty successful quote response clears that feed's current values. Failed requests preserve the prior values with error/stale status. An empty reference catalogue preserves the existing catalogue and retries.
-- Reaching EEX's 60,000-record cap fails visibly instead of silently accepting incomplete data. Product partitioning would need to be added for any market that reaches this cap.
+- A range that reaches EEX's 60,000-record cap is split into shorter history jobs. A single-day response that still reaches the cap fails visibly.
 - Subscription timing is an administrator-declared label, not a measurement. Confirm account entitlements, multi-user use and permitted retention with EEX before production rollout.
 
 ## Local evaluation and tests
@@ -78,6 +99,6 @@ Use `-u eex_market_data` instead of `-i` for subsequent runs on the same test da
 
 ## API sources
 
-Implementation checked against the public [EEX derivatives OpenAPI schema](https://eds.eex-group.com/api-spec/derivatives.yaml), API version 1.0.1, retrieved 16 September 2026, and [EEX REST v2 User Guide, revision 007](https://www.eex.com/fileadmin/EEX/Downloads/Market_Data/EEX_Group_DataSource/API/EEX_Group_DataSource_REST_API__v2__User_Guide_v007.pdf).
+Implementation checked against the public [EEX derivatives OpenAPI schema](https://eds.eex-group.com/api-spec/derivatives.yaml), API version 1.0.1, and [EEX REST v2 User Guide, revision 008](https://www.eex.com/fileadmin/EEX/Downloads/Market_Data/EEX_Group_DataSource/API/EEX_Group_DataSource_REST_API__v2__User_Guide_v008.pdf).
 
 See [architecture and acceptance checklist](docs/ARCHITECTURE.md) for rollout validation. Live acceptance with the client's account remains a deployment step; mocked tests do not establish account entitlements or real-world latency.

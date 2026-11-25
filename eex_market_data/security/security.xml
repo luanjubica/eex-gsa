@@ -38,6 +38,31 @@
         <field name="groups" eval="[(4, ref('group_eex_manager'))]"/>
         <field name="domain_force">[(1, '=', 1)]</field>
     </record>
+    <record id="series_company_rule" model="ir.rule">
+        <field name="name">Rolling contracts: allowed companies</field>
+        <field name="model_id" ref="model_eex_watchlist_series"/>
+        <field name="domain_force">[('company_id', 'in', company_ids)]</field>
+    </record>
+    <record id="series_read_rule" model="ir.rule">
+        <field name="name">Rolling contracts: own or shared read</field>
+        <field name="model_id" ref="model_eex_watchlist_series"/>
+        <field name="groups" eval="[(4, ref('group_eex_user'))]"/>
+        <field name="domain_force">['|', ('watchlist_id.owner_id', '=', user.id), ('watchlist_id.shared', '=', True)]</field>
+        <field name="perm_write" eval="False"/><field name="perm_create" eval="False"/><field name="perm_unlink" eval="False"/>
+    </record>
+    <record id="series_owner_rule" model="ir.rule">
+        <field name="name">Rolling contracts: owner edits</field>
+        <field name="model_id" ref="model_eex_watchlist_series"/>
+        <field name="groups" eval="[(4, ref('group_eex_user'))]"/>
+        <field name="domain_force">[('watchlist_id.owner_id', '=', user.id)]</field>
+        <field name="perm_read" eval="False"/>
+    </record>
+    <record id="series_manager_rule" model="ir.rule">
+        <field name="name">Rolling contracts: administrator management</field>
+        <field name="model_id" ref="model_eex_watchlist_series"/>
+        <field name="groups" eval="[(4, ref('group_eex_manager'))]"/>
+        <field name="domain_force">[(1, '=', 1)]</field>
+    </record>
     <record id="connection_company_rule" model="ir.rule">
         <field name="name">Connections: allowed companies</field><field name="model_id" ref="model_eex_connection"/>
         <field name="domain_force">[('company_id', 'in', company_ids)]</field>

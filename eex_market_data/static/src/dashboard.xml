@@ -17,8 +17,8 @@
                         <div><span>Instruments</span><strong t-esc="state.data.rows.length"/></div>
                         <div><span>Collection target</span><strong><t t-if="state.data.refresh_interval"><t t-esc="Math.max(state.data.refresh_interval, state.data.minimum_refresh)"/> sec</t><t t-else="">Manual</t></strong></div>
                         <div><span>Subscription</span><strong t-esc="state.data.timing === 'realtime' ? 'Real-time' : state.data.timing === 'delayed' ? 'Delayed' : 'Timing unverified'"/></div>
-                        <div><span>Board checked (UTC)</span><strong t-esc="state.checkedAt || '—'"/></div>
-                        <div><span>Feed collection</span><strong t-esc="state.data.collection_progress.label"/></div>
+                        <div><span>Last feed checked (UTC)</span><strong t-esc="lastStatsAt"/></div>
+                        <div t-if="state.data.live_stats"><span>Last collection target</span><strong><t t-esc="state.data.fast_last_interval"/> sec</strong></div><div><span>Feed collection</span><strong t-esc="state.data.collection_progress.label"/></div>
                     </div>
                     <div class="eex-progress-card">
                         <div class="eex-progress-copy">
@@ -37,6 +37,7 @@
                     </div>
                     <div t-if="!state.data.enabled" class="alert alert-warning">Collection is not enabled. An EEX administrator must configure the connection.</div>
                     <div t-if="state.data.pending" class="alert alert-info">A collection refresh has been requested. Prices appear after the background worker completes.</div>
+                    <div t-if="state.data.unresolved_series.length" class="alert alert-warning" role="status">Waiting for a matching contract for <t t-esc="state.data.unresolved_series.join(', ')"/>.</div>
                     <div class="eex-table-wrap" t-if="state.data.rows.length">
                         <table class="table table-sm eex-table"><thead><tr><th t-foreach="state.data.columns" t-as="column" t-key="column.key" t-att-class="column.type === 'number' ? 'text-end' : ''" t-esc="column.label"/></tr></thead>
                             <tbody><tr t-foreach="state.data.rows" t-as="row" t-key="row.id">
@@ -49,7 +50,7 @@
                         </table>
                     </div>
                     <div t-else="" class="eex-empty-state"><i class="fa fa-list-alt"/><h2>Choose your futures</h2><p>Add instruments from the catalogue to start following their prices.</p><button t-if="state.data.can_edit" class="btn btn-primary" t-on-click="edit">Select instruments</button></div>
-                    <p class="eex-footnote">The board checks Odoo's cache every <t t-esc="state.data.board_refresh_interval"/> seconds while this page is visible; this check never calls EEX. EEX collection follows the watchlist target and administrator minimum, subject to queue load and EEX limits. Changed numeric values are highlighted for 30 seconds. “—” means unavailable; settlement prices are for the displayed trading date.</p>
+                    <p class="eex-footnote">The board checks Odoo's cache every <t t-esc="state.data.board_refresh_interval"/> seconds while this page is visible; this check never calls EEX. <t t-if="state.data.live_stats">Last price updates after each completed statistics fetch. </t>Collection targets depend on queue load and EEX limits. Changed numeric values are highlighted for 30 seconds. “—” means unavailable; settlement prices are for the displayed trading date.</p>
                 </t>
                 <div t-else="" class="eex-empty-state"><i class="fa fa-line-chart"/><h2>A watchlist for your markets</h2><p>Create a personal selection of futures, choose your columns, and set a collection interval.</p><button class="btn btn-primary" t-on-click="create">Create watchlist</button></div>
             </t>
@@ -82,7 +83,7 @@
                     </section>
                 </t>
                 <div t-else="" class="eex-empty-state"><i class="fa fa-table"/><h2>No daily history yet</h2><p>Queue the latest EEX trading days, then return when background collection completes.</p><button class="btn btn-primary" t-on-click="loadHistory">Load history</button></div>
-                <p class="eex-footnote">Each market has its own date-by-instrument table. Use the value selector for close, settlement, OHLC, or volume. All update timestamps are UTC.</p>
+                <p class="eex-footnote">Each market has its own date-by-instrument table. Use the value selector for settlement close, last trade, OHLC, or volume. All update timestamps are UTC.</p>
             </t>
             <div t-elif="!state.error" class="eex-empty-state">Loading daily history…</div>
         </div>

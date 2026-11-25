@@ -2,12 +2,14 @@
 
 ```mermaid
 flowchart LR
-    EEX[EEX REST v2] -->|GET / Bearer token| Worker[Single background worker]
+    EEX[EEX REST v2] -->|GET / Bearer token| Worker[Single REST collector]
     Worker --> Catalogue[Instrument catalogue]
     Worker --> Cache[Shared per-feed cache]
     Cache --> Board[Personal watchlist boards]
+    Worker -->|After commit in Fast Last mode| Bus[Odoo WebSocket notification]
+    Bus -->|Read affected statistics from cache| Board
     Cache --> Export[XLSX export]
-    Worker --> History[Sampled history]
+    Worker --> History[Daily API history and intraday samples]
     History --> Charts[Odoo graphs and pivots]
     Watchlists[Private / shared watchlists] --> Queue[Deduplicated collection jobs]
     Queue --> Worker
@@ -21,6 +23,7 @@ flowchart LR
 | `eex.market` | Discovered commodity/area, enabled flag, current EEX trading date | Administrator changes enabled flag; worker discovers data |
 | `eex.instrument` | Stable ISIN, readable name, maturity and delivery dates | Worker |
 | `eex.watchlist` | Owner, company sharing, instruments, columns and interval | Owner or administrator |
+| `eex.watchlist.series` | Original rolling YAML symbol and current resolved instrument | Board owner or administrator; worker resolves the contract |
 | `eex.quote` | Current values and timestamps separately for each feed | Worker |
 | `eex.snapshot` | Numeric observations for charts, including valid zero values | Worker |
 | `eex.job` | Persistent deduplicated requests, retry state, sanitized error | Worker; administrator can retry |
@@ -36,11 +39,11 @@ Every API request is read-only. The API origin is fixed to the official EEX orig
 3. Discover markets, enable only licensed markets, synchronize reference data, and inspect job results. Confirm local instrument names, ISINs, delivery periods and currency/units against EEX.
 4. Give the two users different private watchlists. Confirm private list inaccessibility, shared list read-only access, and cross-company isolation if applicable.
 5. Compare at least one liquid and one illiquid instrument for each required market against EEX's portal: last/statistics, bid/ask, settlement and timestamps. Check negative/zero prices if available.
-6. Test collection intervals under the expected user/market count. Watch queue age and request latency; tune intervals before considering a separate ingestion service.
+6. Test Fast Last on staging with the expected user and market count. Measure EEX request latency, queue age and receipt-to-render time independently. Check that killing the WebSocket connection leaves periodic cache refresh working.
 7. Test a missing feed entitlement, expired token, market holiday and network interruption. Restore access, retry failed jobs, and confirm stale values recover.
 8. Validate empty versus zero cells in XLSX. Confirm snapshots, charts and retention align with the client's intended use and EEX permissions.
 9. Run the collector alongside the existing ExcelTool before its 31 December 2026 retirement. Agree on accepted price/timestamp differences and sign off with the actual users.
 
 ## Extensions deliberately deferred
 
-Historical backfill, alerts, contract rolling, additional EEX API families, product-level query partitioning, shared rate limiting across databases, and sub-minute collection need explicit follow-up scope. The existing service/model separation allows these additions without replacing user watchlists.
+A licensed power-derivatives stream, historical reconstruction of rolling series, alerts, additional EEX API families and coordination with collectors in other databases or applications remain separate extensions.

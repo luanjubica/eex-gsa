@@ -1,7 +1,10 @@
 /** @odoo-module **/
 import { registry } from '@web/core/registry';
 import { useService } from '@web/core/utils/hooks';
-import { Component, onWillStart, onWillUnmount, useState } from '@odoo/owl';
+import { Component, onWillStart, onWillDestroy, useState } from '@odoo/owl';
+
+const priceFormatter = new Intl.NumberFormat(undefined, { maximumFractionDigits: 4 });
+const volumeFormatter = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
 
 export class EexDashboard extends Component {
     setup() {
@@ -9,19 +12,65 @@ export class EexDashboard extends Component {
         this.action = useService('action');
         this.notification = useService('notification');
         this.state = useState({
-            data: null, error: '', busy: false, checkedAt: '', changedCells: {},
+            data: null, error: '', busy: false, changedCells: {},
             secondsUntilCheck: 60, checkProgress: 0,
         });
         this.selected = this.props.action.params?.watchlist_id || false;
+        this.requestedWatchlist = this.selected;
         this.alive = true;
-        this.sequence = 0;
-        this.previousValues = null;
-        this.previousWatchlist = false;
+        this.reloadQueued = false;
+        this.channels = new Set();
+        this.pendingMarkets = new Set();
+        this.deltaPending = false;
+        this.bus = useService('bus_service');
+        this.onPrices = ({ detail }) => {
+            for (const { type, payload } of detail) {
+                if (type === 'eex/latest' && this.channels.has(payload)) {
+                    this.pendingMarkets.add(payload);
+                }
+            }
+            this.flushLatest();
+        };
+        this.onReconnect = () => {
+            if (this.channels.size) this.load();
+        };
+        this.onVisibility = () => {
+            if (!document.hidden && this.channels.size) this.load();
+        };
+        this.bus.addEventListener('notification', this.onPrices);
+        this.bus.addEventListener('connect', this.onReconnect);
+        this.bus.addEventListener('reconnect', this.onReconnect);
+        document.addEventListener('visibilitychange', this.onVisibility);
         onWillStart(async () => {
             await this.load();
-            this.timer = setInterval(() => this.tick(), 250);
+            if (this.alive) this.timer = setInterval(() => this.tick(), 250);
         });
-        onWillUnmount(() => { this.alive = false; clearInterval(this.timer); });
+        onWillDestroy(() => {
+            this.alive = false;
+            clearInterval(this.timer);
+            this.bus.removeEventListener('notification', this.onPrices);
+            this.bus.removeEventListener('connect', this.onReconnect);
+            this.bus.removeEventListener('reconnect', this.onReconnect);
+            document.removeEventListener('visibilitychange', this.onVisibility);
+            for (const market of this.channels) this.bus.deleteChannel(this.channel(market));
+            this.channels.clear();
+        });
+    }
+    channel(id) { return `eex_market_data.market.${id}`; }
+    syncChannels(marketIds) {
+        const next = new Set(marketIds);
+        for (const market of this.channels) {
+            if (!next.has(market)) this.bus.deleteChannel(this.channel(market));
+        }
+        const added = [...next].filter(market => !this.channels.has(market));
+        this.channels = next;
+        for (const market of added) {
+            this.bus.addChannel(this.channel(market)).then(() => {
+                if (!this.channels.has(market)) this.bus.deleteChannel(this.channel(market));
+            }).catch(() => {
+                // The periodic board check also works when WebSocket is unavailable.
+            });
+        }
     }
     scheduleNextCheck() {
         const seconds = this.state.data?.board_refresh_interval || 60;
@@ -36,30 +85,88 @@ export class EexDashboard extends Component {
         this.state.secondsUntilCheck = Math.ceil(remaining / 1000);
         this.state.checkProgress = Math.min(100, Math.round(100 * (this.pollDuration - remaining) / this.pollDuration));
         if (!remaining && !this.state.busy) this.load();
+        const now = Date.now();
+        for (const [key, until] of Object.entries(this.state.changedCells)) {
+            if (until <= now) delete this.state.changedCells[key];
+        }
     }
     async load() {
-        if (this.state.busy) return;
-        const sequence = ++this.sequence;
+        if (!this.alive) return;
+        if (this.state.busy || this.deltaPending) {
+            this.reloadQueued = true;
+            return;
+        }
+        this.reloadQueued = false;
+        const watchlist = this.requestedWatchlist;
         this.state.busy = true;
         try {
-            const data = await this.orm.call('eex.watchlist', 'dashboard_data', [this.selected]);
-            if (this.alive && sequence === this.sequence) {
+            const data = await this.orm.call('eex.watchlist', 'dashboard_data', [watchlist]);
+            if (this.alive && this.requestedWatchlist === watchlist) {
                 this.trackChanges(data);
                 this.state.data = data;
-                this.state.checkedAt = new Date().toISOString().slice(11, 19) + ' UTC';
                 this.selected = data.selected;
+                this.requestedWatchlist = data.selected;
                 this.state.error = '';
+                this.syncChannels(data.market_ids || []);
             }
         } catch (error) {
-            if (this.alive && sequence === this.sequence) {
+            if (this.alive && this.requestedWatchlist === watchlist) {
                 this.state.error = 'Could not load the watchlist. Check your connection and access permissions.';
             }
         } finally {
-            if (this.alive && sequence === this.sequence) {
+            if (this.alive) {
                 this.state.busy = false;
                 this.scheduleNextCheck();
+                this.runPending();
             }
         }
+    }
+    runPending() {
+        if (this.reloadQueued) this.load();
+        else this.flushLatest();
+    }
+    async flushLatest() {
+        if (!this.alive || document.hidden || this.state.busy || this.deltaPending ||
+                !this.pendingMarkets.size || this.requestedWatchlist !== this.selected) return;
+        const markets = new Set([...this.pendingMarkets].filter(id => this.channels.has(id)));
+        this.pendingMarkets.clear();
+        if (!markets.size || !this.state.data) return;
+        const watchlist = this.selected;
+        this.deltaPending = true;
+        try {
+            const data = await this.orm.call('eex.watchlist', 'dashboard_latest', [watchlist, [...markets]]);
+            if (!this.alive || this.requestedWatchlist !== watchlist) return;
+            const rows = this.state.data.rows.filter(row => markets.has(row.market_id));
+            const feeds = new Map((data?.rows || []).map(row => [row.id, row.feed]));
+            if (feeds.size !== rows.length || rows.some(row => !feeds.has(row.id))) {
+                this.reloadQueued = true;
+                return;
+            }
+            const expires = Date.now() + 30000;
+            const columns = this.state.data.columns.filter(column => column.source === 'stat' && column.type === 'number');
+            for (const row of rows) {
+                const feed = feeds.get(row.id);
+                for (const column of columns) {
+                    if ((row.feeds.stat.values[column.field] ?? null) !== (feed.values[column.field] ?? null)) {
+                        this.state.changedCells[this.cellKey(row, column.key)] = expires;
+                    }
+                }
+                row.feeds.stat = feed;
+            }
+        } catch (error) {
+            // The next full cache check reconciles permissions, connectivity and any missed events.
+        } finally {
+            this.deltaPending = false;
+            if (this.alive) this.runPending();
+        }
+    }
+    get lastStatsAt() {
+        let latest = '';
+        for (const row of this.state.data.rows) {
+            const fetched = row.feeds.stat.fetched_at;
+            if (fetched && fetched > latest) latest = fetched;
+        }
+        return latest ? latest + ' UTC' : '—';
     }
     cellKey(row, key) { return `${row.id}:${key}`; }
     feedForColumn(row, column) {
@@ -72,33 +179,27 @@ export class EexDashboard extends Component {
         return value === undefined ? null : value;
     }
     trackChanges(data) {
-        const now = Date.now();
-        const snapshot = {};
-        const sameWatchlist = this.previousWatchlist === data.selected;
-        const changed = {};
-        if (sameWatchlist) {
-            for (const [key, until] of Object.entries(this.state.changedCells)) {
-                if (until > now) changed[key] = until;
-            }
+        const current = this.state.data;
+        if (current?.selected !== data.selected) {
+            this.state.changedCells = {};
+            return;
         }
+        const byId = new Map(current.rows.map(row => [row.id, row]));
+        const existing = new Set(current.columns.filter(column => column.type === 'number').map(column => column.key));
+        const columns = data.columns.filter(column => column.type === 'number' && existing.has(column.key));
+        const expires = Date.now() + 30000;
         for (const row of data.rows) {
-            for (const column of data.columns) {
-                const key = this.cellKey(row, column.key);
-                const value = this.value(row, column);
-                snapshot[key] = value;
-                if (column.type === 'number' && sameWatchlist && this.previousValues &&
-                        Object.prototype.hasOwnProperty.call(this.previousValues, key) &&
-                        this.previousValues[key] !== value) {
-                    changed[key] = now + 30000;
+            const previous = byId.get(row.id);
+            if (!previous) continue;
+            for (const column of columns) {
+                if (this.rawValue(previous, column) !== this.rawValue(row, column)) {
+                    this.state.changedCells[this.cellKey(row, column.key)] = expires;
                 }
             }
         }
-        this.previousValues = snapshot;
-        this.previousWatchlist = data.selected;
-        this.state.changedCells = changed;
     }
     isChanged(row, key) { return Boolean(this.state.changedCells[this.cellKey(row, key)]); }
-    async select(event) { this.selected = Number(event.target.value); await this.load(); }
+    async select(event) { this.requestedWatchlist = Number(event.target.value); await this.load(); }
     async refresh() {
         try {
             await this.orm.call('eex.watchlist', 'action_refresh', [[this.selected]]);
@@ -133,9 +234,7 @@ export class EexDashboard extends Component {
     value(row, column) {
         const value = this.rawValue(row, column);
         if (value === null || value === '' || value === false && column.type !== 'availability') return '—';
-        if (column.type === 'number') return new Intl.NumberFormat(undefined, {
-            maximumFractionDigits: column.field === 'volume' ? 2 : 4,
-        }).format(value);
+        if (column.type === 'number') return (column.field === 'volume' ? volumeFormatter : priceFormatter).format(value);
         if (column.type === 'status') return this.label(value);
         if (column.type === 'availability') return value ? 'Available' : 'Outside latest catalogue';
         if (column.type === 'datetime') return value + ' UTC';
@@ -143,7 +242,7 @@ export class EexDashboard extends Component {
     }
     label(status) {
         return { ok: 'Available', waiting: 'Awaiting data', empty: 'No data', stale: 'Stale cache',
-            previous_day: 'Earlier trading day', error: 'Collection error', disabled: 'Feed disabled', paused: 'Collection paused' }[status] || status;
+            previous_day: 'Earlier trading day', error: 'Collection error', authentication: 'Authentication failed', disabled: 'Feed disabled', paused: 'Collection paused' }[status] || status;
     }
     shortTime(feed) { return feed.fetched_at ? feed.fetched_at.slice(11, 19) : '—'; }
     cellClass(row, column) {
@@ -151,13 +250,16 @@ export class EexDashboard extends Component {
         return [column.type === 'number' ? 'text-end eex-number' : '',
             ['date', 'datetime'].includes(column.type) ? 'eex-time-cell' : '',
             column.type === 'text' ? 'eex-text-cell' : '',
-            feed && ['stale', 'error', 'paused'].includes(feed.status) ? 'text-warning' : '',
+            feed && ['stale', 'error', 'authentication', 'paused'].includes(feed.status) ? 'text-warning' : '',
         ].filter(Boolean).join(' ');
     }
     title(row, column) {
         const feed = this.feedForColumn(row, column);
         const value = this.rawValue(row, column);
-        return feed ? this.detail(feed) : value === null || value === '' ? '' : String(value);
+        if (!feed) return value === null || value === '' ? '' : String(value);
+        const detail = this.detail(feed);
+        return column.key === 'last' && value === null && ['ok', 'empty'].includes(feed.status)
+            ? 'No Last trade reported for this session.\n' + detail : detail;
     }
     detail(feed) {
         return `${this.label(feed.status)}\nTrading date: ${feed.trade_date || '—'}\nSource: ${feed.source_at ? feed.source_at + ' UTC' : 'Not supplied'}\nFetched: ${feed.fetched_at ? feed.fetched_at + ' UTC' : '—'}${feed.message ? '\n' + feed.message : ''}`;
@@ -172,7 +274,7 @@ export class EexHistoryDashboard extends Component {
         this.action = useService('action');
         this.notification = useService('notification');
         this.watchlistId = this.props.action.params?.watchlist_id;
-        this.state = useState({ data: null, error: '', busy: false, metric: 'last' });
+        this.state = useState({ data: null, error: '', busy: false, metric: 'settlement' });
         onWillStart(() => this.load());
     }
     async load(metric = this.state.metric) {
@@ -199,7 +301,7 @@ export class EexHistoryDashboard extends Component {
         });
     }
     async details() {
-        const action = await this.orm.call('eex.watchlist', 'action_history_details', [[this.watchlistId]]);
+        const action = await this.orm.call('eex.watchlist', 'action_history_details', [[this.watchlistId], this.state.metric]);
         return this.action.doAction(action);
     }
     async loadHistory() {

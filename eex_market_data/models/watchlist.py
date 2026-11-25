@@ -7,6 +7,8 @@ import pytz
 from odoo import api, fields, models, _
 from odoo.exceptions import AccessError, ValidationError
 
+from ..services.client import INVALID_TOKEN_MESSAGE, MISSING_TOKEN_MESSAGE
+
 INSTRUMENT_COLUMNS = [
     ('name', 'Instrument', 'instrument', 'name', 'text'),
     ('long_name', 'Description', 'instrument', 'long_name', 'text'),
@@ -52,25 +54,10 @@ FEED_COLUMNS = [
 ]
 BOARD_COLUMNS = INSTRUMENT_COLUMNS + METRIC_COLUMNS + FEED_COLUMNS
 BOARD_COLUMN_FIELDS = ['show_' + column[0] for column in BOARD_COLUMNS]
-HISTORY_METRICS = [('last', 'Close / last'), ('settlement', 'Settlement'), ('open', 'Open'),
+HISTORY_METRICS = [('settlement', 'Settlement close'), ('last', 'Last trade'), ('open', 'Open'),
                    ('high', 'High'), ('low', 'Low'), ('volume', 'Volume')]
 BOOK_MONTH_CODES = {1: 'F', 2: 'G', 3: 'H', 4: 'J', 5: 'K', 6: 'M',
                     7: 'N', 8: 'Q', 9: 'U', 10: 'V', 11: 'X', 12: 'Z'}
-BOOK_CONTINUOUS_SYMBOLS = {
-    ('POWER', 'DE', 'day'): '/E.DB_DAILY',
-    ('POWER', 'DE', 'week'): '/E.DEB_WEEK',
-    ('POWER', 'DE', 'weekend'): '/E.DWB_WEEK',
-    ('POWER', 'GR', 'day'): '/E.FF_DAILY',
-    ('POWER', 'GR', 'week'): '/E.FFB_WEEK',
-    ('POWER', 'GR', 'weekend'): '/E.FFW_WEEK',
-    ('POWER', 'IT', 'day'): '/E.FD_DAILY',
-    ('POWER', 'IT', 'week'): '/E.FDB_WEEK',
-    ('POWER', 'IT', 'weekend'): '/E.FDW_WEEK',
-    ('POWER', 'RS', 'week'): '/E.FZB_WEEK',
-    ('POWER', 'HU', 'day'): '/E.F9_DAILY',
-    ('POWER', 'HU', 'week'): '/E.F9B_WEEK',
-    ('POWER', 'HU', 'weekend'): '/E.W9B_WEEK',
-}
 
 
 class EexWatchlist(models.Model):
@@ -85,6 +72,8 @@ class EexWatchlist(models.Model):
     company_id = fields.Many2one('res.company', required=True, default=lambda self: self.env.company)
     shared = fields.Boolean(string='Share with EEX users in this company', default=False)
     instrument_ids = fields.Many2many('eex.instrument', string='Instruments', check_company=True)
+    series_ids = fields.One2many('eex.watchlist.series', 'watchlist_id', string='Rolling contracts',
+                                 check_company=True, copy=True)
     refresh_interval = fields.Integer(default=300, string='Collection interval (seconds; 0 = manual)')
     refresh_requested = fields.Boolean(readonly=True, default=True, copy=False)
     last_scheduled = fields.Datetime(readonly=True, copy=False)
@@ -126,12 +115,12 @@ class EexWatchlist(models.Model):
     show_spr_source_at = fields.Boolean(string='Settlement source timestamp')
     show_spr_fetched_at = fields.Boolean(string='Settlement fetched timestamp', default=True)
 
-    @api.constrains('refresh_interval', 'instrument_ids', 'owner_id', 'company_id')
+    @api.constrains('refresh_interval', 'instrument_ids', 'series_ids', 'owner_id', 'company_id')
     def _validate_watchlist(self):
         for record in self:
             if record.refresh_interval != 0 and record.refresh_interval < 60:
                 raise ValidationError(_('Use 0 for manual collection, or at least 60 seconds.'))
-            if len(record.instrument_ids) > 500:
+            if len(record.instrument_ids) + len(record.series_ids) > 500:
                 raise ValidationError(_('A watchlist can contain at most 500 instruments.'))
             if record.company_id not in record.owner_id.company_ids:
                 raise ValidationError(_('The owner must belong to the watchlist company.'))
@@ -159,9 +148,15 @@ class EexWatchlist(models.Model):
             if not self.env.user.has_group('eex_market_data.group_eex_manager'):
                 if 'owner_id' in vals and vals['owner_id'] != self.env.uid:
                     raise AccessError(_('You cannot transfer ownership of a watchlist.'))
-        if 'instrument_ids' in vals:
+        if {'instrument_ids', 'series_ids'} & vals.keys():
             vals = dict(vals, refresh_requested=True)
         return super().write(vals)
+
+    def _effective_instruments(self):
+        return self.instrument_ids | self.series_ids.instrument_id
+
+    def _watched_markets(self):
+        return self.instrument_ids.market_id | self.series_ids.market_id
 
     def _check_read(self):
         self.ensure_one()
@@ -189,20 +184,6 @@ class EexWatchlist(models.Model):
 
     @staticmethod
     def _book_symbol(instrument):
-        commodity = (instrument.commodity or 'POWER').upper()
-        area = (instrument.area or '').upper()
-        maturity_type = (instrument.maturity_type or '').strip().lower()
-        series = False
-        if 'weekend' in maturity_type:
-            series = 'weekend'
-        elif maturity_type in ('day', 'daily'):
-            series = 'day'
-        elif maturity_type in ('week', 'weekly'):
-            series = 'week'
-        continuous = BOOK_CONTINUOUS_SYMBOLS.get((commodity, area, series))
-        if continuous:
-            return continuous
-
         short_code = (instrument.short_code or '').strip().upper()
         if not re.fullmatch(r'[A-Z0-9_]+', short_code):
             raise ValidationError(_('Instrument %s has a short code that cannot be exported.') % instrument.name)
@@ -219,16 +200,13 @@ class EexWatchlist(models.Model):
             lambda instrument: (instrument.commodity, instrument.area, instrument.short_code,
                                 instrument.delivery_start or fields.Date.today(), instrument.maturity))
         grouped = {}
-        market_names = {}
         for instrument in instruments:
-            key = ((instrument.commodity or 'POWER').upper(), (instrument.area or '').upper())
-            group = grouped.setdefault(key, [])
-            market_names.setdefault(key, instrument.market_id.name)
-            symbol = self._book_symbol(instrument)
-            if symbol not in group:
-                group.append(symbol)
+            grouped.setdefault(instrument.market_id, {}).setdefault(self._book_symbol(instrument), None)
+        for series in self.series_ids:
+            grouped.setdefault(series.market_id, {}).setdefault(series.symbol, None)
+        markets = sorted(grouped, key=lambda market: (market.commodity, market.area))
 
-        default_commodity = next(iter(grouped), ('POWER', ''))[0]
+        default_commodity = markets[0].commodity if markets else 'POWER'
         lines = [
             '# Generated from the Odoo EEX market board %s.' % json.dumps(self.name, ensure_ascii=False),
             '# Save this file as config/book.yaml for the eex-data tool.',
@@ -243,16 +221,15 @@ class EexWatchlist(models.Model):
             return '\n'.join(lines) + '\n'
 
         lines.append('sheets:')
-        for (commodity, area), symbols in grouped.items():
-            sheet_name = market_names.get((commodity, area)) or '%s / %s' % (commodity, area)
+        for market in markets:
             lines.extend([
-                '  - name: %s' % json.dumps(sheet_name, ensure_ascii=False),
-                '    area: %s' % area,
+                '  - name: %s' % json.dumps(market.name, ensure_ascii=False),
+                '    area: %s' % json.dumps(market.area, ensure_ascii=False),
             ])
-            if commodity != default_commodity:
-                lines.append('    commodity: %s' % commodity)
+            if market.commodity != default_commodity:
+                lines.append('    commodity: %s' % json.dumps(market.commodity, ensure_ascii=False))
             lines.append('    instruments:')
-            lines.extend('      - %s' % symbol for symbol in symbols)
+            lines.extend('      - %s' % symbol for symbol in grouped[market])
             lines.append('')
         return '\n'.join(lines).rstrip() + '\n'
 
@@ -261,20 +238,23 @@ class EexWatchlist(models.Model):
         return {'type': 'ir.actions.client', 'tag': 'eex_market_data.history_dashboard',
                 'params': {'watchlist_id': self.id}}
 
-    def action_history_details(self):
+    def action_history_details(self, metric='settlement'):
         self._check_read()
-        return {'type': 'ir.actions.act_window', 'name': _('EEX daily history'), 'res_model': 'eex.historical',
-                'view_mode': 'graph,tree,pivot',
+        labels = dict(HISTORY_METRICS)
+        metric = metric if metric in labels else 'settlement'
+        return {'type': 'ir.actions.act_window', 'name': _('EEX daily history: %s') % labels[metric],
+                'res_model': 'eex.historical', 'view_mode': 'graph,tree,pivot',
                 'views': [(False, 'graph'), (False, 'tree'), (False, 'pivot')],
-                'domain': [('instrument_id', 'in', self.instrument_ids.ids)],
-                'context': {'search_default_last_price': 1, 'fill_temporal': False}}
+                'domain': [('instrument_id', 'in', self._effective_instruments().ids), ('metric', '=', metric)],
+                'context': {'fill_temporal': False}}
 
     def action_history_refresh(self):
         self._check_read()
-        markets = self.instrument_ids.mapped('market_id').filtered('enabled')
-        markets.sudo().write({'history_requested': True})
+        markets = self._watched_markets().filtered('enabled')
+        # Queue before touching market rows, like the collector, to preserve lock order.
         for market in markets:
             self.env['eex.job'].sudo()._enqueue(market.connection_id, 'dates', market)
+        markets.sudo().write({'history_requested': True})
         connection = self.env['eex.connection'].sudo().search([('company_id', '=', self.company_id.id)], limit=1)
         days = connection.history_backfill_days if connection else 10
         return {'type': 'ir.actions.client', 'tag': 'display_notification', 'params': {
@@ -286,8 +266,20 @@ class EexWatchlist(models.Model):
         self._check_read()
         return {'type': 'ir.actions.act_url', 'url': '/eex/watchlist/%s/history/export' % self.id, 'target': 'self'}
 
+    def _history_rows(self, instruments, days, metric=None):
+        history = self.env['eex.historical']
+        domain = [('instrument_id', 'in', instruments.ids)]
+        if metric:
+            domain.append(('metric', '=', metric))
+        groups = history.read_group(domain, ['trade_date'], ['trade_date:day'],
+                                    limit=days, orderby='trade_date desc')
+        dates = sorted(group['__range']['trade_date:day']['from'] for group in groups)
+        rows = history.search(domain + [('trade_date', 'in', dates)],
+                              order='trade_date, instrument_id, metric') if dates else history
+        return dates, rows
+
     @api.model
-    def history_dashboard_data(self, watchlist_id, metric='last'):
+    def history_dashboard_data(self, watchlist_id, metric='settlement'):
         self.check_access_rights('read')
         watchlist = self.browse(int(watchlist_id)).exists()
         if not watchlist:
@@ -295,23 +287,22 @@ class EexWatchlist(models.Model):
         watchlist._check_read()
         labels = dict(HISTORY_METRICS)
         if metric not in labels:
-            metric = 'last'
+            metric = 'settlement'
         connection = self.env['eex.connection'].sudo().search([
             ('company_id', '=', watchlist.company_id.id)], limit=1)
         days = connection.history_backfill_days if connection else 10
-        instruments = watchlist.instrument_ids.sorted(
+        instruments = watchlist._effective_instruments().sorted(
             lambda instrument: (instrument.market_id.name, instrument.short_code,
                                 instrument.delivery_start or fields.Date.today(), instrument.maturity))
-        history = self.env['eex.historical'].search([
-            ('instrument_id', 'in', instruments.ids)], order='trade_date, instrument_id, metric')
         tables = []
-        latest_fetch = max(history.mapped('fetched_at'), default=False)
+        latest_fetch = False
         for market in instruments.mapped('market_id').sorted('name'):
             market_instruments = instruments.filtered(lambda instrument: instrument.market_id == market)
-            market_history = history.filtered(lambda row: row.market_id == market)
-            dates = sorted(set(market_history.mapped('trade_date')))[-days:]
-            values = {(row.trade_date, row.instrument_id.id): row.value for row in market_history
-                      if row.metric == metric}
+            dates, market_history = watchlist._history_rows(market_instruments, days, metric)
+            for row in market_history:
+                if not latest_fetch or row.fetched_at > latest_fetch:
+                    latest_fetch = row.fetched_at
+            values = {(str(row.trade_date), row.instrument_id.id): row.value for row in market_history}
             tables.append({
                 'id': market.id,
                 'name': market.name,
@@ -331,6 +322,62 @@ class EexWatchlist(models.Model):
                 'tables': tables, 'days': days,
                 'updated_at': fields.Datetime.to_string(latest_fetch) if latest_fetch else False}
 
+    @staticmethod
+    def _dashboard_feed(instrument, kind, connection, active_feeds, quote, job, now, today, stale_after):
+        status = 'waiting'
+        if not connection or not connection.enabled or not connection.active or not instrument.market_id.enabled:
+            status = 'paused'
+        elif kind not in active_feeds:
+            status = 'disabled'
+        elif job and job.message:
+            status = 'authentication' if job.message in (MISSING_TOKEN_MESSAGE, INVALID_TOKEN_MESSAGE) else 'error'
+        elif quote:
+            status = 'empty' if quote.status == 'empty' else 'ok'
+            if (now - quote.fetched_at).total_seconds() > stale_after:
+                status = 'stale'
+            elif quote.trade_date != today and status == 'ok':
+                status = 'previous_day'
+        return {
+            'status': status,
+            'values': (quote.values_json or {}) if quote else {},
+            'trade_date': str(quote.trade_date) if quote else None,
+            'source_at': fields.Datetime.to_string(quote.source_at) if quote and quote.source_at else None,
+            'fetched_at': fields.Datetime.to_string(quote.fetched_at) if quote else None,
+            'message': job.message if job else None,
+        }
+
+    def _stat_stale_after(self, connection, fast_last):
+        return (max(30, 3 * connection.fast_last_interval) if fast_last
+                else max(connection.stale_after, self.refresh_interval * 2) if connection else 60)
+
+    @api.model
+    def dashboard_latest(self, watchlist_id, market_ids):
+        """Refresh only statistics for the requested markets on an accessible board."""
+        watchlist = self.browse(int(watchlist_id)).exists()
+        if not watchlist:
+            return None
+        watchlist._check_read()
+        requested = set(int(market_id) for market_id in market_ids)
+        instruments = watchlist._effective_instruments().filtered(
+            lambda instrument: instrument.market_id.id in requested)
+        markets = instruments.market_id
+        connection = self.env['eex.connection'].sudo().search([('company_id', '=', watchlist.company_id.id)], limit=1)
+        feeds = connection._feeds() if connection else []
+        fast_last = connection and connection.fast_last and connection._uses_service_collector()
+        fetched = self.env['eex.quote'].search([('instrument_id', 'in', instruments.ids), ('kind', '=', 'stat')])
+        quotes = {quote.instrument_id.id: quote for quote in fetched}
+        jobs = self.env['eex.job'].sudo().search([('market_id', 'in', markets.ids), ('kind', '=', 'stat')])
+        by_market = {job.market_id.id: job for job in jobs}
+        now = fields.Datetime.now()
+        today = datetime.now(pytz.timezone('Europe/Berlin')).date()
+        stale_after = watchlist._stat_stale_after(connection, fast_last)
+        return {'rows': [
+            {'id': instrument.id, 'market_id': instrument.market_id.id, 'feed': self._dashboard_feed(
+                instrument, 'stat', connection, feeds, quotes.get(instrument.id),
+                by_market.get(instrument.market_id.id), now, today, stale_after)}
+            for instrument in instruments
+        ]}
+
     @api.model
     def dashboard_data(self, watchlist_id=False):
         self.check_access_rights('read')
@@ -345,7 +392,15 @@ class EexWatchlist(models.Model):
         columns = [{'key': key, 'label': label, 'source': source, 'field': field, 'type': value_type}
                    for key, label, source, field, value_type in BOARD_COLUMNS
                    if watchlist['show_' + key]]
+        instruments = watchlist._effective_instruments()
+        markets = watchlist._watched_markets()
+        service = connection and connection._uses_service_collector()
+        fast_last = bool(service and connection.fast_last and connection.collect_stat)
         result.update(selected=watchlist.id, name=watchlist.name, columns=columns,
+                      live_stats=fast_last,
+                      fast_last_interval=connection.fast_last_interval if fast_last else False,
+                      market_ids=markets.ids if fast_last else [],
+                      unresolved_series=watchlist.series_ids.filtered(lambda line: not line.instrument_id).mapped('symbol'),
                       refresh_interval=watchlist.refresh_interval,
                       minimum_refresh=connection.minimum_refresh if connection else 60,
                       board_refresh_interval=connection.board_refresh_interval if connection else 60,
@@ -355,14 +410,15 @@ class EexWatchlist(models.Model):
                       can_edit=watchlist.owner_id == self.env.user or self.env.user.has_group('eex_market_data.group_eex_manager'))
         now = fields.Datetime.now()
         today = datetime.now(pytz.timezone('Europe/Berlin')).date()
-        jobs = self.env['eex.job'].sudo().search([('market_id', 'in', watchlist.instrument_ids.market_id.ids)])
+        jobs = self.env['eex.job'].sudo().search([
+            ('market_id', 'in', markets.ids), ('kind', 'in', ['stat', 'tob', 'spr'])])
         jobs_by_key = {}
         for job in jobs:
             key = (job.market_id.id, job.kind)
             current = jobs_by_key.get(key)
             if not current or (job.last_attempt or datetime.min) > (current.last_attempt or datetime.min):
                 jobs_by_key[key] = job
-        enabled_markets = watchlist.instrument_ids.mapped('market_id').filtered('enabled')
+        enabled_markets = markets.filtered('enabled')
         feed_kinds = connection._feeds() if connection and connection.enabled and connection.active else []
         expected = [(market.id, kind) for market in enabled_markets for kind in feed_kinds]
         completed = failed = 0
@@ -393,32 +449,20 @@ class EexWatchlist(models.Model):
             'last_scheduled': fields.Datetime.to_string(watchlist.last_scheduled)
                               if watchlist.last_scheduled else False,
         }
-        for instrument in watchlist.instrument_ids.sorted(lambda i: (i.short_code, i.delivery_start or today, i.maturity)):
-            feeds = {}
-            for kind in ('stat', 'tob', 'spr'):
-                quote = instrument.quote_ids.filtered(lambda q: q.kind == kind)[:1]
-                job = jobs_by_key.get((instrument.market_id.id, kind))
-                status = 'waiting'
-                if not connection or not connection.enabled or not connection.active or not instrument.market_id.enabled:
-                    status = 'paused'
-                elif kind not in connection._feeds():
-                    status = 'disabled'
-                elif job and job.message:
-                    status = 'error'
-                elif quote:
-                    status = 'empty' if quote.status == 'empty' else 'ok'
-                    if (now - quote.fetched_at).total_seconds() > max(connection.stale_after, watchlist.refresh_interval * 2):
-                        status = 'stale'
-                    elif quote.trade_date != today and status == 'ok':
-                        status = 'previous_day'
-                feeds[kind] = {'status': status, 'values': quote.values_json or {} if quote else {},
-                               'trade_date': str(quote.trade_date) if quote else None,
-                               'source_at': fields.Datetime.to_string(quote.source_at) if quote and quote.source_at else None,
-                               'fetched_at': fields.Datetime.to_string(quote.fetched_at) if quote else None,
-                               'message': job.message if job else None}
+        quotes = {(quote.instrument_id.id, quote.kind): quote for quote in instruments.quote_ids}
+        normal_stale = max(connection.stale_after, watchlist.refresh_interval * 2) if connection else 60
+        fast_stale = watchlist._stat_stale_after(connection, fast_last)
+        for instrument in instruments.sorted(lambda i: (i.short_code, i.delivery_start or today, i.maturity)):
+            feeds = {
+                kind: self._dashboard_feed(instrument, kind, connection, feed_kinds,
+                                           quotes.get((instrument.id, kind)),
+                                           jobs_by_key.get((instrument.market_id.id, kind)), now, today,
+                                           fast_stale if kind == 'stat' else normal_stale)
+                for kind in ('stat', 'tob', 'spr')
+            }
             result['rows'].append({'id': instrument.id, 'name': instrument.name, 'long_name': instrument.long_name,
                 'short_code': instrument.short_code, 'isin': instrument.isin,
-                'market': instrument.market_id.name, 'commodity': instrument.commodity, 'area': instrument.area,
+                'market': instrument.market_id.name, 'market_id': instrument.market_id.id, 'commodity': instrument.commodity, 'area': instrument.area,
                 'maturity': instrument.maturity, 'maturity_type': instrument.maturity_type,
                 'currency': instrument.currency, 'price_unit': instrument.price_unit,
                 'volume_unit': instrument.volume_unit, 'available': instrument.available,
